@@ -1,0 +1,6 @@
+__pycache__/
+*.py[cod]
+data/uploads/
+data/sources.json
+data/quiz_history.json
+data/mastery.json
