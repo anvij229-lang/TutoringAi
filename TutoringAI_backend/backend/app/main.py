@@ -7,7 +7,7 @@ load_dotenv()
 
 from app.routes import health, materials, tutor
 
-app = FastAPI(title="ClueX Tutor API", version="0.1.0")
+app = FastAPI(title="TutoringAI API", version="0.1.0")
 
 app.add_middleware(
     CORSMiddleware,
@@ -23,4 +23,4 @@ app.include_router(tutor.router)
 
 @app.get("/")
 def root():
-    return {"name": "ClueX Tutor API", "status": "running"}
+    return {"name": "TutoringAI API", "status": "running"}
