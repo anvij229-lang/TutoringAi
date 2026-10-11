@@ -9,6 +9,7 @@ from app.services.rag import retrieve_chunks
 from app.services.topics import get_or_detect_topics
 from app.utils.json_utils import parse_json
 from app.utils.prompts import QUIZ_PROMPT
+from app.services.learner_model import auto_difficulty
 
 VALID_DIFFICULTIES = ("easy", "medium", "hard")
 MIN_QUESTIONS = 3
@@ -84,10 +85,10 @@ def validate_question(item, topic_names: list):
     }
 
 
-def generate_quiz(material_id: str, topic_id, difficulty: str, number_of_questions: int):
+def generate_quiz(material_id: str, topic_id, difficulty: str, number_of_questions: int, user_id: str = "demo"):
     difficulty = difficulty.strip().lower()
-    if difficulty not in VALID_DIFFICULTIES:
-        raise ValueError("difficulty must be easy, medium or hard")
+    if difficulty != "auto" and difficulty not in VALID_DIFFICULTIES:
+        raise ValueError("difficulty must be auto, easy, medium or hard")
     if not MIN_QUESTIONS <= number_of_questions <= MAX_QUESTIONS:
         raise ValueError(
             f"number_of_questions must be between {MIN_QUESTIONS} and {MAX_QUESTIONS}"
@@ -101,6 +102,9 @@ def generate_quiz(material_id: str, topic_id, difficulty: str, number_of_questio
         raise ValueError("Invalid material_id or topic_id")
 
     topics = select_topics(material_id, topic_id, number_of_questions)
+    adaptive = difficulty == "auto"
+    if adaptive:
+        difficulty = auto_difficulty(user_id, [t["id"] for t in topics])
     context = build_context(material_id, topics)
     if not context.strip():
         raise ValueError("Not enough material to build a quiz")
@@ -175,6 +179,7 @@ def generate_quiz(material_id: str, topic_id, difficulty: str, number_of_questio
     return {
         "quiz_id": quiz_id,
         "material_id": material_id,
+        "adaptive": adaptive,
         "difficulty": difficulty,
         "topics": topic_names,
         "questions": output,

@@ -5,7 +5,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 load_dotenv()
 
-from app.routes import health, materials, tutor, quiz
+from app.routes import health, materials, tutor, quiz, progress
 
 app = FastAPI(title="TutoringAI API", version="0.1.0")
 
@@ -21,6 +21,7 @@ app.include_router(health.router)
 app.include_router(materials.router)
 app.include_router(tutor.router)
 app.include_router(quiz.router)
+app.include_router(progress.router)
 
 @app.get("/")
 def root():

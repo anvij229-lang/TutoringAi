@@ -1,6 +1,7 @@
 import uuid
 
 from app.database.db import get_connection
+from app.services.learner_model import answers_for_mastery, update_mastery
 
 WEAK_BELOW = 60
 STRONG_FROM = 80
@@ -143,6 +144,8 @@ def submit_quiz(quiz_id: str, answers: list, user_id: str = "demo"):
                     for row in rows
                 ],
             )
+            with conn.cursor() as cur:
+                mastery_changes = update_mastery(cur, user_id, attempt_id, answers_for_mastery(rows, submitted))
         conn.commit()
 
     return {
@@ -155,5 +158,6 @@ def submit_quiz(quiz_id: str, answers: list, user_id: str = "demo"):
         "strong_topics": strong_topics,
         "weak_topics": weak_topics,
         "recommendation": build_recommendation(weak_topics, developing_topics, missed_pages),
+        "mastery_changes": mastery_changes,
         "results": results,
     }

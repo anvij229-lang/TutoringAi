@@ -11,8 +11,9 @@ router = APIRouter(prefix="/api/quiz", tags=["quiz"])
 class GenerateRequest(BaseModel):
     material_id: str
     topic_id: str | None = None
-    difficulty: str = "medium"
+    difficulty: str = "auto"
     number_of_questions: int = 5
+    user_id: str = "demo"
 
 
 class AnswerItem(BaseModel):
@@ -55,6 +56,7 @@ def generate(request: GenerateRequest):
         request.topic_id,
         request.difficulty,
         request.number_of_questions,
+        request.user_id.strip() or "demo",
     )
 
 
