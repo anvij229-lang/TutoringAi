@@ -91,6 +91,7 @@ def submit_quiz(quiz_id: str, answers: list, user_id: str = "demo"):
                         "is_correct": is_correct,
                         "explanation": row[4],
                         "source_page": row[5],
+                        "source_label": row[8],
                     }
                 )
 
