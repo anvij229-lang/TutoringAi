@@ -48,7 +48,7 @@ def teach_topic(topic_id: str, user_id: str = "demo"):
             "sources": [],
         }
 
-    context = "\n\n".join(f"[Page {c['page']}]\n{c['text']}" for c in chunks)
+    context = "\n\n".join(f"[{c['label']}]\n{c['text']}" for c in chunks)
     prompt = f"Topic: {name}\nStudent level: {level}\n\nStudy material:\n{context}"
     reply = chat(TEACH_PROMPT, prompt, temperature=0.3)
 

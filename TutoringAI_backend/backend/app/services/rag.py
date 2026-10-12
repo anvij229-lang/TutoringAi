@@ -1,3 +1,4 @@
+from app.utils.citations import source_label
 import os
 import uuid
 import re
@@ -21,19 +22,25 @@ def clean_query(q: str) -> str:
 
 
 def retrieve_chunks(material_id: str, question: str, top_k: int = 5):
-    """Return the top_k most similar chunks for a question."""
     embedding = create_embedding(question)
     with get_connection() as conn:
         with conn.cursor() as cur:
             cur.execute(
-                "SELECT content, page_number, similarity "
+                "SELECT content, page_number, start_seconds, file_type, similarity "
                 "FROM match_chunks(%s::vector, %s::uuid, %s)",
                 (str(embedding), material_id, top_k),
             )
             rows = cur.fetchall()
     return [
-        {"text": r[0], "page": r[1], "similarity": float(r[2])}
-        for r in rows
+        {
+            "text": row[0],
+            "page": row[1],
+            "start_seconds": row[2],
+            "file_type": row[3],
+            "label": source_label(row[3], row[1], row[2]),
+            "similarity": float(row[4]),
+        }
+        for row in rows
     ]
 
 
@@ -60,7 +67,7 @@ def answer_question(material_id: str, question: str):
                 "reason": "below_threshold"}
 
     # Build context with page labels
-    context = "\n\n".join(f"[Page {c['page']}]\n{c['text']}" for c in relevant)
+    context = "\n\n".join(f"[{c['label']}]\n{c['text']}" for c in relevant)
     answer = chat(GROUNDING_PROMPT, f"Context:\n{context}\n\nQuestion: {question}")
 
     # Layer 2: the LLM says the context doesn't answer it

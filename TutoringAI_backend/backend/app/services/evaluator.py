@@ -41,7 +41,7 @@ def submit_quiz(quiz_id: str, answers: list, user_id: str = "demo"):
 
             cur.execute(
                 "SELECT q.id, q.question, q.options, q.correct_answer, q.explanation, "
-                "q.source_page, q.topic_id, t.name "
+                "q.source_page, q.topic_id, t.name, q.source_label "
                 "FROM questions q LEFT JOIN topics t ON t.id = q.topic_id "
                 "WHERE q.quiz_id = %s::uuid ORDER BY q.position",
                 (quiz_id,),
