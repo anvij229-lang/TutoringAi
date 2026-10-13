@@ -10,6 +10,7 @@ from app.services.topics import get_or_detect_topics
 from app.utils.json_utils import parse_json
 from app.utils.prompts import QUIZ_PROMPT
 from app.services.learner_model import auto_difficulty
+from app.utils.citations import clean_source_label
 
 VALID_DIFFICULTIES = ("easy", "medium", "hard")
 MIN_QUESTIONS = 3
@@ -37,7 +38,7 @@ def build_context(material_id: str, topics: list) -> str:
         chunks = retrieve_chunks(material_id, query, top_k=per_topic)
         for chunk in chunks:
             blocks.append(
-                f"[Topic: {topic['name']} | Page {chunk['page']}]\n{chunk['text']}"
+                f"[Topic: {topic['name']} | {chunk['label']}]\n{chunk['text']}"
             )
     return "\n\n".join(blocks)
 
@@ -70,10 +71,9 @@ def validate_question(item, topic_names: list):
         lowered = {n.lower(): n for n in topic_names}
         topic = lowered.get(topic.lower(), topic_names[0])
 
-    try:
-        page = int(item.get("page"))
-    except (TypeError, ValueError):
-        page = None
+    source = clean_source_label(item.get("source"))
+    digits = re.search(r"\d+", source) if source and not source.startswith("Video") else None
+    page = int(digits.group()) if digits else None
 
     return {
         "topic": topic,
@@ -81,6 +81,7 @@ def validate_question(item, topic_names: list):
         "options": options,
         "answer": answer,
         "explanation": str(item.get("explanation", "")).strip(),
+        "source": source or None,
         "page": page,
     }
 
@@ -151,8 +152,8 @@ def generate_quiz(material_id: str, topic_id, difficulty: str, number_of_questio
                 cur.execute(
                     "INSERT INTO questions "
                     "(quiz_id, topic_id, position, question, question_type, difficulty, "
-                    "options, correct_answer, explanation, source_page) "
-                    "VALUES (%s::uuid, %s::uuid, %s, %s, 'mcq', %s, %s::jsonb, %s, %s, %s) "
+                    "options, correct_answer, explanation, source_page, source_label) "
+                    "VALUES (%s::uuid, %s::uuid, %s, %s, 'mcq', %s, %s::jsonb, %s, %s, %s, %s) "
                     "RETURNING id",
                     (
                         quiz_id,
@@ -164,6 +165,7 @@ def generate_quiz(material_id: str, topic_id, difficulty: str, number_of_questio
                         q["answer"],
                         q["explanation"],
                         q["page"],
+                        q["source"],
                     ),
                 )
                 output.append(

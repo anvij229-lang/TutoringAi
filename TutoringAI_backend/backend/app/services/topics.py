@@ -25,8 +25,8 @@ def sample_material_text(material_id: str) -> str:
     with get_connection() as conn:
         with conn.cursor() as cur:
             cur.execute(
-                "SELECT content, page_number FROM chunks "
-                "WHERE material_id = %s::uuid ORDER BY page_number, chunk_index",
+                "SELECT content FROM chunks WHERE material_id = %s::uuid "
+                "ORDER BY page_number, start_seconds, chunk_index",
                 (material_id,),
             )
             rows = cur.fetchall()
@@ -34,7 +34,7 @@ def sample_material_text(material_id: str) -> str:
         return ""
     step = max(1, len(rows) // 25)
     sampled = rows[::step][:25]
-    parts = [f"[Page {r[1]}] {r[0][:500]}" for r in sampled]
+    parts = [r[0][:500] for r in sampled]
     return "\n\n".join(parts)[:MAX_CONTEXT_CHARS]
 
 
