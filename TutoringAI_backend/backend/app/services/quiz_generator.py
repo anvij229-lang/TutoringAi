@@ -10,6 +10,7 @@ from app.services.topics import get_or_detect_topics
 from app.utils.json_utils import parse_json
 from app.utils.prompts import QUIZ_PROMPT
 from app.services.learner_model import auto_difficulty
+from app.utils.citations import clean_source_label
 
 VALID_DIFFICULTIES = ("easy", "medium", "hard")
 MIN_QUESTIONS = 3
@@ -70,8 +71,8 @@ def validate_question(item, topic_names: list):
         lowered = {n.lower(): n for n in topic_names}
         topic = lowered.get(topic.lower(), topic_names[0])
 
-    source = str(item.get("source", "")).strip()[:40]
-    digits = re.search(r"\d+", source) if source.lower().startswith(("page", "slide")) else None
+    source = clean_source_label(item.get("source"))
+    digits = re.search(r"\d+", source) if source and not source.startswith("Video") else None
     page = int(digits.group()) if digits else None
 
     return {

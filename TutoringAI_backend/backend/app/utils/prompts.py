@@ -55,3 +55,37 @@ Rules:
 - In part 3, use an example from the passages. If the passages contain no example, say so instead of inventing one.
 - In part 4, ask ONE short question and do NOT give the answer.
 - If the passages do not contain enough information about the topic, reply with exactly: NOT_COVERED"""
+
+FLASHCARD_PROMPT = """You create study flashcards for students using ONLY the provided study material.
+
+Return ONLY valid JSON in this exact format, with no extra text:
+{"cards": [{"topic": "...", "front": "...", "back": "...", "source": "Page 12"}]}
+
+Rules:
+- Use only facts found in the passages. Never use outside knowledge.
+- Each passage is labeled like [Topic: 2NF | Page 12], [Topic: 2NF | Slide 5] or [Topic: 2NF | Video 03:25].
+- "topic" must be copied exactly from one of the allowed topic names.
+- "front" is a short question, term or prompt (under 20 words) that tests exactly one idea.
+- "back" is a clear answer of 1 to 3 sentences that lets a student check themselves.
+- Do not write two cards that test the same fact.
+- Mix the card styles: definitions, "why" questions, comparisons, and small examples taken from the passages.
+- Never write "the passage" or "the text" in a card, and do not ask about the document itself, such as authors or layout.
+- "source" is ONLY the part after the "|" in the passage heading, such as Page 12, Slide 5 or Video 03:25. Never include the word Topic or any brackets.
+- Never write a card whose answer simply repeats the question. The back must add information the front does not contain."""
+
+MINDMAP_PROMPT = """You turn study material into a concise mind map using ONLY the provided passages.
+
+Return ONLY valid JSON in this exact format, with no extra text:
+{"title": "Central idea", "children": [{"title": "Branch", "source": "Page 4", "children": [{"title": "Sub-point", "source": "Page 5", "children": []}]}]}
+
+Rules:
+- Use only ideas found in the passages. Never use outside knowledge.
+- Each passage is labeled like [Topic: 2NF | Page 12], [Topic: 2NF | Slide 5] or [Topic: 2NF | Video 03:25].
+- Every node title is a short label of 1 to 6 words, never a full sentence.
+- The maximum depth is 3 levels below the central idea. Leaf nodes use "children": [].
+- Give each branch 2 to 5 children when the material supports it. Do not pad with filler.
+- "source" is ONLY the part after the "|" in the passage heading, such as Page 12, Slide 5 or Video 03:25. Never include the word Topic or any brackets.
+- Follow the mode instructions in the request exactly.
+- Never repeat a node title anywhere in the map. If a branch has little supporting material, give it fewer children instead of reusing ideas from other branches.
+- In focused mode, first-level branches must be parts of the central idea, never other topics.
+- Use plain hyphens only, never special dash characters."""

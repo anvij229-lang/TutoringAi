@@ -1,3 +1,19 @@
+import re
+
+SOURCE_PATTERN = re.compile(
+r"(Page\s+\d+|Slide\s+\d+|Video\s+(?:\d+:)?\d{1,2}:\d{2})",
+re.IGNORECASE,
+)
+
+
+def clean_source_label(value):
+    text = " ".join(str(value or "").split())
+    match = SOURCE_PATTERN.search(text)
+    if not match:
+        return None
+    kind, number = match.group(1).split(None, 1)
+    return f"{kind.capitalize()} {number}"
+
 def format_seconds(seconds) -> str:
     total = int(seconds or 0)
     hours, remainder = divmod(total, 3600)
