@@ -2,10 +2,12 @@ const $ = (selector) => document.querySelector(selector);
 const input = $('#file-input');
 const zone = $('#drop-zone');
 const status = $('#upload-status');
-const libraryPage = $('.main-content > .page:not(#tutor-page):not(#quiz-page):not(#dashboard-page)');
+const libraryPage = $('.main-content > .page:not(#tutor-page):not(#quiz-page):not(#dashboard-page):not(#flashcards-page):not(#mindmap-page)');
 const tutorPage = $('#tutor-page');
 const quizPage = $('#quiz-page');
 const dashboardPage = $('#dashboard-page');
+const flashcardsPage = $('#flashcards-page');
+const mindmapPage = $('#mindmap-page');
 
 // The backend's default CORS origin is http://localhost:5173. Serve this folder
 // with `py -m http.server 5173` and open /web/ while FastAPI runs on port 8001.
@@ -17,6 +19,7 @@ let sources = readMaterials();
 let activeMaterialId = localStorage.getItem(ACTIVE_MATERIAL_KEY) || sources[0]?.id || '';
 let activeQuizId = null;
 let topicCache = [];
+let flashcardSession = null;
 
 function readMaterials() {
   try {
@@ -185,6 +188,92 @@ async function loadQuizTopics() {
   }
 }
 
+async function loadToolTopics(selectId, emptyLabel) {
+  const select = $(selectId);
+  const previous = select.value;
+  select.innerHTML = `<option value="">${escapeHtml(emptyLabel)}</option>`;
+  const material = currentMaterial();
+  if (!material) return;
+  const data = await api(`/api/quiz/topics/${encodeURIComponent(material.id)}`);
+  const topics = data.topics || [];
+  select.innerHTML = `<option value="">${escapeHtml(emptyLabel)}</option>` + topics.map((topic) => `<option value="${escapeHtml(topic.id)}">${escapeHtml(topic.name)}</option>`).join('');
+  if (topics.some((topic) => topic.id === previous)) select.value = previous;
+}
+
+function renderFlashcard() {
+  const session = flashcardSession;
+  const section = $('#flashcard-session');
+  if (!session) {
+    section.classList.add('hidden');
+    return;
+  }
+  section.classList.remove('hidden');
+  if (session.index >= session.cards.length) {
+    $('#flashcard-progress').textContent = `${session.cards.length} cards reviewed`;
+    $('#flashcard-mode').textContent = session.mode || 'Study set complete';
+    $('#flashcard-face-label').textContent = 'SESSION COMPLETE';
+    $('#flashcard-face').textContent = `You marked ${session.known} of ${session.cards.length} cards as known.`;
+    $('#flashcard-source').textContent = 'Generate another set to keep practicing.';
+    $('#flashcard-reveal').classList.add('hidden');
+    $('#flashcard-review-actions').classList.add('hidden');
+    return;
+  }
+  const card = session.cards[session.index];
+  $('#flashcard-progress').textContent = `Card ${session.index + 1} of ${session.cards.length}`;
+  $('#flashcard-mode').textContent = session.mode || 'Course review';
+  $('#flashcard-face-label').textContent = session.revealed ? 'ANSWER' : 'QUESTION';
+  $('#flashcard-face').textContent = session.revealed ? card.back : card.front;
+  $('#flashcard-source').textContent = card.source ? `Source: ${card.source}` : (card.topic || 'From your uploaded material');
+  $('#flashcard-reveal').classList.toggle('hidden', session.revealed);
+  $('#flashcard-review-actions').classList.toggle('hidden', !session.revealed);
+}
+
+async function generateFlashcards() {
+  const material = requireMaterial();
+  const status = $('#flashcard-status');
+  status.textContent = 'Generating grounded flashcards…';
+  $('#flashcard-session').classList.add('hidden');
+  const request = {
+    material_id: material.id,
+    number_of_cards: Number($('#flashcard-count').value),
+    weak_only: $('#flashcard-weak-only').checked,
+    user_id: USER_ID,
+  };
+  const topicId = $('#flashcard-topic').value;
+  if (topicId) request.topic_id = topicId;
+  const result = await api('/api/flashcards/generate', jsonOptions(request));
+  const cards = result.cards || [];
+  if (!cards.length) throw new Error('No flashcards were returned for this material.');
+  flashcardSession = { cards, index: 0, revealed: false, known: 0, mode: result.mode };
+  status.textContent = `${cards.length} flashcards ready.`;
+  renderFlashcard();
+}
+
+function renderMindmapNode(node) {
+  const state = node.status ? statusClass(node.status) : '';
+  const mastery = node.mastery == null ? '' : `<span class="status-chip ${state}">${Number(node.mastery)}% · ${escapeHtml(node.status || 'mastery')}</span>`;
+  const source = node.source ? `<small>${escapeHtml(node.source)}</small>` : '';
+  const children = node.children?.length ? `<ul>${node.children.map(renderMindmapNode).join('')}</ul>` : '';
+  return `<li class="mindmap-node"><article class="mindmap-node-card ${state}"><b>${escapeHtml(node.title || 'Topic')}</b>${mastery}${source}</article>${children}</li>`;
+}
+
+async function generateMindmap(refresh = false) {
+  const material = requireMaterial();
+  const status = $('#mindmap-status');
+  const output = $('#mindmap-output');
+  status.textContent = refresh ? 'Refreshing the topic map…' : 'Building a map from your course…';
+  output.innerHTML = '';
+  const request = { material_id: material.id, refresh, user_id: USER_ID };
+  const topicId = $('#mindmap-topic').value;
+  if (topicId) request.topic_id = topicId;
+  const result = await api('/api/mindmap/generate', jsonOptions(request));
+  if (!result.tree) throw new Error('No topic map was returned for this material.');
+  const root = result.tree;
+  const children = (root.children || []).map(renderMindmapNode).join('');
+  output.innerHTML = `<div class="mindmap-summary"><b>${escapeHtml(root.title || material.name)}</b><span>${Number(result.node_count) || 0} connected concepts</span><span>${result.cached ? 'Saved map' : 'Generated just now'}</span></div><ul class="mindmap-tree"><li class="mindmap-node mindmap-root"><article class="mindmap-node-card"><b>${escapeHtml(root.title || material.name)}</b></article><ul>${children}</ul></li></ul>`;
+  status.textContent = 'Topic map ready.';
+}
+
 function statusClass(value) {
   return ['weak', 'developing', 'strong', 'not_started'].includes(value) ? value : 'not_started';
 }
@@ -252,19 +341,32 @@ function setActiveMaterial(id) {
   $('#quiz-topic').innerHTML = '<option value="">Mixed topics</option>';
   if (!$('#quiz-page').classList.contains('hidden')) loadQuizTopics();
   if (!$('#dashboard-page').classList.contains('hidden')) loadDashboard();
+  if (!flashcardsPage.classList.contains('hidden')) {
+    flashcardSession = null;
+    renderFlashcard();
+    loadToolTopics('#flashcard-topic', 'All topics').catch((error) => { $('#flashcard-status').textContent = error.message; });
+  }
+  if (!mindmapPage.classList.contains('hidden')) {
+    $('#mindmap-output').innerHTML = '';
+    loadToolTopics('#mindmap-topic', 'Whole course').catch((error) => { $('#mindmap-status').textContent = error.message; });
+  }
 }
 
 function showView(view) {
-  if (!['library', 'tutor', 'quiz', 'dashboard'].includes(view)) view = 'library';
+  if (!['library', 'tutor', 'quiz', 'dashboard', 'flashcards', 'mindmap'].includes(view)) view = 'library';
   libraryPage.classList.toggle('hidden', view !== 'library');
   tutorPage.classList.toggle('hidden', view !== 'tutor');
   quizPage.classList.toggle('hidden', view !== 'quiz');
   dashboardPage.classList.toggle('hidden', view !== 'dashboard');
+  flashcardsPage.classList.toggle('hidden', view !== 'flashcards');
+  mindmapPage.classList.toggle('hidden', view !== 'mindmap');
   document.querySelectorAll('.nav-item[data-view]').forEach((button) => button.classList.toggle('selected', button.dataset.view === view));
-  $('.breadcrumb b').textContent = view === 'tutor' ? 'Ask your tutor' : view === 'quiz' ? 'Practice quiz' : view === 'dashboard' ? 'My progress' : 'Course library';
+  $('.breadcrumb b').textContent = ({ tutor: 'Ask your tutor', quiz: 'Practice quiz', dashboard: 'My progress', flashcards: 'Flashcards', mindmap: 'Topic map' })[view] || 'Course library';
   if (view === 'tutor') $('#question-input').focus();
   if (view === 'quiz') loadQuizTopics();
   if (view === 'dashboard') loadDashboard();
+  if (view === 'flashcards') loadToolTopics('#flashcard-topic', 'All topics').catch((error) => { $('#flashcard-status').textContent = error.message; });
+  if (view === 'mindmap') loadToolTopics('#mindmap-topic', 'Whole course').catch((error) => { $('#mindmap-status').textContent = error.message; });
 }
 
 function addQuestion(text) {
@@ -412,6 +514,57 @@ document.querySelectorAll('.nav-item[data-view]').forEach((button) => button.add
 for (const eventName of ['dragenter', 'dragover']) zone.addEventListener(eventName, (event) => { event.preventDefault(); zone.classList.add('drag-over'); });
 for (const eventName of ['dragleave', 'drop']) zone.addEventListener(eventName, (event) => { event.preventDefault(); zone.classList.remove('drag-over'); });
 zone.addEventListener('drop', (event) => upload(event.dataTransfer.files[0]));
+
+$('#flashcard-setup').addEventListener('submit', async (event) => {
+  event.preventDefault();
+  try {
+    await generateFlashcards();
+  } catch (error) {
+    $('#flashcard-status').textContent = error.message;
+  }
+});
+
+$('#flashcard-reveal').addEventListener('click', () => {
+  if (!flashcardSession || flashcardSession.index >= flashcardSession.cards.length) return;
+  flashcardSession.revealed = true;
+  renderFlashcard();
+});
+
+$('#flashcard-review-actions').addEventListener('click', async (event) => {
+  const button = event.target.closest('[data-card-review]');
+  if (!button || !flashcardSession || !flashcardSession.revealed) return;
+  const card = flashcardSession.cards[flashcardSession.index];
+  const known = button.dataset.cardReview === 'true';
+  button.disabled = true;
+  try {
+    await api('/api/flashcards/review', jsonOptions({ card_id: card.card_id, known, user_id: USER_ID }));
+    if (known) flashcardSession.known += 1;
+    flashcardSession.index += 1;
+    flashcardSession.revealed = false;
+    renderFlashcard();
+  } catch (error) {
+    $('#flashcard-status').textContent = error.message;
+  } finally {
+    button.disabled = false;
+  }
+});
+
+$('#mindmap-setup').addEventListener('submit', async (event) => {
+  event.preventDefault();
+  try {
+    await generateMindmap(false);
+  } catch (error) {
+    $('#mindmap-status').textContent = error.message;
+  }
+});
+
+$('#mindmap-refresh').addEventListener('click', async () => {
+  try {
+    await generateMindmap(true);
+  } catch (error) {
+    $('#mindmap-status').textContent = error.message;
+  }
+});
 
 document.addEventListener('click', async (event) => {
   const materialButton = event.target.closest('[data-select-material]');

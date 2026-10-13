@@ -18,6 +18,8 @@
       <button class="nav-item selected" data-view="library"><span>▤</span> Course library</button>
       <button class="nav-item" data-view="tutor"><span>✳</span> Ask your tutor</button>
       <button class="nav-item" data-view="quiz"><span>◷</span> Practice quiz</button>
+      <button class="nav-item" data-view="flashcards"><span>▧</span> Flashcards</button>
+      <button class="nav-item" data-view="mindmap"><span>⌘</span> Topic map</button>
       <button class="nav-item" data-view="dashboard"><span>▥</span> My progress</button>
       <div class="sidebar-bottom"><div class="avatar">S</div><span><b>Student</b><small>Local demo</small></span><span class="more">···</span></div>
     </aside>
@@ -72,9 +74,35 @@
         <div class="dashboard-section"><div><h2>Mastery trend</h2><p>Changes recorded after quiz attempts.</p></div><div id="mastery-trend" class="mastery-trend"></div></div>
         <div class="dashboard-section"><div><h2>Quiz history</h2><p>Your recent completed assessments.</p></div><div id="attempt-list" class="attempt-list"></div></div>
       </section>
+      <section class="page tool-page flashcards-page hidden" id="flashcards-page">
+        <div class="eyebrow">ACTIVE RECALL FROM YOUR COURSE</div><h1>Flashcards.</h1><p class="intro">Reveal each answer, then mark whether you knew it. Your review is saved to your progress.</p>
+        <form id="flashcard-setup" class="tool-setup">
+          <label>Topic<select id="flashcard-topic"><option value="">All topics</option></select></label>
+          <label>Cards<select id="flashcard-count"><option value="10">10 cards</option><option value="5">5 cards</option><option value="15">15 cards</option></select></label>
+          <label class="check-control"><input type="checkbox" id="flashcard-weak-only"> Focus on weak topics</label>
+          <button class="primary-button" type="submit">Generate flashcards</button>
+        </form>
+        <div id="flashcard-status" class="tool-status" role="status" aria-live="polite"></div>
+        <section id="flashcard-session" class="flashcard-session hidden" aria-live="polite">
+          <div class="flashcard-session-meta"><span id="flashcard-progress"></span><span id="flashcard-mode"></span></div>
+          <article class="flashcard-card"><span id="flashcard-face-label" class="eyebrow">QUESTION</span><h2 id="flashcard-face"></h2><small id="flashcard-source" class="flashcard-source"></small></article>
+          <button id="flashcard-reveal" class="primary-button" type="button">Reveal answer</button>
+          <div id="flashcard-review-actions" class="flashcard-review-actions hidden"><button type="button" class="secondary-button" data-card-review="false">Need to review</button><button type="button" class="primary-button" data-card-review="true">I knew it</button></div>
+        </section>
+      </section>
+      <section class="page tool-page mindmap-page hidden" id="mindmap-page">
+        <div class="eyebrow">SEE HOW IDEAS CONNECT</div><h1>Topic map.</h1><p class="intro">Explore concepts from your uploaded material and see topic mastery where available.</p>
+        <form id="mindmap-setup" class="tool-setup">
+          <label>Scope<select id="mindmap-topic"><option value="">Whole course</option></select></label>
+          <button class="primary-button" type="submit">Generate topic map</button>
+          <button class="secondary-button" id="mindmap-refresh" type="button">Refresh map</button>
+        </form>
+        <div id="mindmap-status" class="tool-status" role="status" aria-live="polite"></div>
+        <div id="mindmap-output" class="mindmap-output"></div>
+      </section>
     </main>
   </div>
   <div class="toast" id="toast" role="status"></div>
-  <script src="/web/app.js?v=20261013-multiformat-upload"></script>
+  <script src="/web/app.js?v=20261013-flashcards-mindmap"></script>
 </body>
 </html>
