@@ -14,9 +14,12 @@ const mindmapPage = $('#mindmap-page');
 const API_BASE = (window.STUDYROOM_API_BASE || 'http://127.0.0.1:8001').replace(/\/$/, '');
 const MATERIALS_KEY = 'studyroom.backend.materials.v1';
 const ACTIVE_MATERIAL_KEY = 'studyroom.backend.active-material.v1';
+const SELECTED_MATERIALS_KEY = 'studyroom.backend.selected-materials.v1';
+const FLASHCARD_REVIEW_HISTORY_KEY = 'studyroom.flashcard-review-history.v1';
 const USER_ID = 'demo';
 let sources = readMaterials();
 let activeMaterialId = localStorage.getItem(ACTIVE_MATERIAL_KEY) || sources[0]?.id || '';
+let selectedMaterialIds = readSelectedMaterialIds();
 let activeQuizId = null;
 let activeQuizQuestions = [];
 let activeQuestionIndex = 0;
@@ -24,6 +27,56 @@ let activeQuizAnswers = {};
 let markedQuestions = new Set();
 let topicCache = [];
 let flashcardSession = null;
+let uploadingFiles = false;
+
+function readFlashcardReviewHistory() {
+  try {
+    const saved = JSON.parse(localStorage.getItem(FLASHCARD_REVIEW_HISTORY_KEY) || '[]');
+    return Array.isArray(saved) ? saved : [];
+  } catch (_) {
+    return [];
+  }
+}
+
+function saveFlashcardReview(card, known) {
+  const history = readFlashcardReviewHistory();
+  const cardId = String(card.card_id ?? `${card.front}|${card.back}`);
+  const material = currentMaterial();
+  const entry = {
+    id: `${material?.id || 'course'}:${cardId}`,
+    cardId,
+    materialId: material?.id || '',
+    materialName: material?.name || '',
+    front: String(card.front || ''),
+    back: String(card.back || ''),
+    topic: String(card.topic || ''),
+    source: String(card.source || ''),
+    known,
+    reviewedAt: new Date().toISOString(),
+  };
+  const existing = history.findIndex((item) => item.id === entry.id);
+  if (existing >= 0) history.splice(existing, 1);
+  history.unshift(entry);
+  try {
+    localStorage.setItem(FLASHCARD_REVIEW_HISTORY_KEY, JSON.stringify(history));
+  } catch (_) {
+    // Keep the current study session usable if browser storage is unavailable.
+  }
+  renderFlashcardReviewHistory();
+}
+
+function renderFlashcardReviewHistory() {
+  const list = $('#flashcard-review-history');
+  if (!list) return;
+  const history = readFlashcardReviewHistory();
+  list.innerHTML = history.length
+    ? history.map((item) => `<article class="flashcard-history-item ${item.known ? 'history-known' : 'history-needs-review'}">
+        <div class="flashcard-history-main"><b>${escapeHtml(item.front || 'Flashcard')}</b><small>${escapeHtml(item.topic || item.materialName || 'Course material')} · Reviewed ${escapeHtml(prettyDate(item.reviewedAt))}</small></div>
+        <span class="flashcard-history-status">${item.known ? 'Knew it' : 'Need to review'}</span>
+        <details><summary>Show answer</summary><p>${escapeHtml(item.back)}</p></details>
+      </article>`).join('')
+    : '<p class="flashcard-history-empty">Your reviewed cards will appear here after you finish a card.</p>';
+}
 
 function readMaterials() {
   try {
@@ -34,13 +87,33 @@ function readMaterials() {
   }
 }
 
+function readSelectedMaterialIds() {
+  try {
+    const saved = JSON.parse(localStorage.getItem(SELECTED_MATERIALS_KEY) || 'null');
+    return new Set(Array.isArray(saved) ? saved.map(String) : []);
+  } catch (_) {
+    return new Set();
+  }
+}
+
 function saveMaterials() {
   localStorage.setItem(MATERIALS_KEY, JSON.stringify(sources));
   if (activeMaterialId) localStorage.setItem(ACTIVE_MATERIAL_KEY, activeMaterialId);
+  localStorage.setItem(SELECTED_MATERIALS_KEY, JSON.stringify([...selectedMaterialIds]));
 }
 
 function currentMaterial() {
   return sources.find((source) => source.id === activeMaterialId) || null;
+}
+
+function selectedMaterials() {
+  return sources.filter((source) => selectedMaterialIds.has(source.id));
+}
+
+function requireMaterials() {
+  const materials = selectedMaterials();
+  if (!materials.length) throw new Error('Upload course material in Course library first, then select at least one source.');
+  return materials;
 }
 
 function escapeHtml(value) {
@@ -107,6 +180,12 @@ function citationLocation(source) {
   return '';
 }
 
+function citationSourceName(source) {
+  return source.source_name || source.file_name || source.material_title || source.source_file
+    || (selectedMaterials().length === 1 ? currentMaterial()?.name : 'Selected course materials')
+    || 'Uploaded material';
+}
+
 function prettyDate(value) {
   if (!value) return 'Date unavailable';
   const date = new Date(value);
@@ -139,20 +218,24 @@ function render() {
   $('#source-count').textContent = sources.length;
   $('#unit-count').textContent = sources.reduce((sum, source) => sum + (source.unit_count || 0), 0);
   $('#topic-count').textContent = topics.size;
+  const selectedCount = selectedMaterials().length;
+  const selectionSummary = $('#selected-source-count');
+  if (selectionSummary) selectionSummary.textContent = `${selectedCount} selected for tutor + quiz`;
   $('#empty-state').classList.toggle('hidden', visible.length > 0);
   $('#empty-state').innerHTML = query
     ? '<div class="empty-icon">⌕</div><b>No matching sources</b><span>Try another search term.</span>'
     : '<div class="empty-icon">▤</div><b>Your library is ready for its first source</b><span>Upload a document or lecture video to start a grounded tutor and adaptive quiz.</span>';
   $('#source-list').innerHTML = visible.map((source) => {
     const active = source.id === activeMaterialId;
+    const selected = selectedMaterialIds.has(source.id);
     const topicsForSource = (source.topics || []).slice(0, 3);
     const unitCount = Number(source.unit_count) || 0;
     const unit = countedUnit(source.unit_label || defaultUnit(materialType(source.name, source.type)), unitCount);
-    return `<article class="source-card ${active ? 'active-source' : ''}">
+    return `<article class="source-card ${selected ? 'active-source selected-source' : ''}">
       ${sourceIcon(source)}
       <div class="source-meta"><b title="${escapeHtml(source.name)}">${escapeHtml(source.name)}</b><small>Added ${prettyDate(source.uploaded_at)} · ${unitCount} processed ${escapeHtml(unit)}</small></div>
       <div class="source-topics">${topicsForSource.map((topic) => `<span class="topic-pill">${escapeHtml(topic)}</span>`).join('')}</div>
-      <div class="source-actions"><button class="source-select" data-select-material="${escapeHtml(source.id)}" ${active ? 'aria-pressed="true"' : 'aria-pressed="false"'}>${active ? 'Selected' : 'Use this course'}</button></div>
+      <div class="source-actions"><button class="source-select ${selected ? 'is-selected' : ''}" data-toggle-material="${escapeHtml(source.id)}" aria-pressed="${selected ? 'true' : 'false'}"><span aria-hidden="true">${selected ? '✓' : '+'}</span> ${selected ? 'Selected' : 'Select source'}</button></div>
     </article>`;
   }).join('');
   renderTutorSources();
@@ -161,9 +244,9 @@ function render() {
 function renderTutorSources() {
   const count = $('#tutor-source-count');
   if (!count) return;
-  count.textContent = sources.length;
+  count.textContent = selectedMaterials().length;
   $('#tutor-sources').innerHTML = sources.length
-    ? sources.map((source) => `<button class="tutor-source ${source.id === activeMaterialId ? 'selected-tutor-source' : ''}" data-select-material="${escapeHtml(source.id)}">${sourceIcon(source, true)}<span title="${escapeHtml(source.name)}">${escapeHtml(source.name)}</span></button>`).join('')
+    ? sources.map((source) => `<button class="tutor-source ${selectedMaterialIds.has(source.id) ? 'selected-tutor-source' : ''}" data-toggle-material="${escapeHtml(source.id)}" aria-pressed="${selectedMaterialIds.has(source.id)}">${sourceIcon(source, true)}<span title="${escapeHtml(source.name)}">${escapeHtml(source.name)}</span><i>${selectedMaterialIds.has(source.id) ? '✓' : '+'}</i></button>`).join('')
     : '<p class="no-sources">Upload course material in the library to ask grounded questions.</p>';
 }
 
@@ -177,7 +260,16 @@ async function loadQuizTopics() {
   const select = $('#quiz-topic');
   const previous = select.value;
   try {
-    const material = requireMaterial();
+    const materials = requireMaterials();
+    if (materials.length > 1) {
+      topicCache = [];
+      select.disabled = true;
+      select.innerHTML = `<option value="">Mixed topics · ${materials.length} sources</option>`;
+      $('#quiz-status').textContent = `This quiz will draw from all ${materials.length} selected sources.`;
+      return;
+    }
+    select.disabled = false;
+    const material = materials[0];
     const data = await api(`/api/quiz/topics/${encodeURIComponent(material.id)}`);
     topicCache = data.topics || [];
     material.topics = topicCache.map((topic) => topic.name);
@@ -187,6 +279,7 @@ async function loadQuizTopics() {
     if (topicCache.some((topic) => topic.id === previous)) select.value = previous;
   } catch (error) {
     topicCache = [];
+    select.disabled = false;
     select.innerHTML = '<option value="">Mixed topics</option>';
     $('#quiz-status').textContent = error.message;
   }
@@ -345,6 +438,7 @@ async function loadDashboard() {
 
 function setActiveMaterial(id) {
   activeMaterialId = id;
+  selectedMaterialIds.add(id);
   topicCache = [];
   saveMaterials();
   render();
@@ -360,6 +454,32 @@ function setActiveMaterial(id) {
     $('#mindmap-output').innerHTML = '';
     loadToolTopics('#mindmap-topic', 'Whole course').catch((error) => { $('#mindmap-status').textContent = error.message; });
   }
+}
+
+function toggleMaterialSelection(id) {
+  const source = sources.find((item) => item.id === id);
+  if (!source) return;
+  if (selectedMaterialIds.has(id)) {
+    if (selectedMaterialIds.size === 1) {
+      status.textContent = 'Keep at least one source selected for tutor and quiz.';
+      return;
+    }
+    selectedMaterialIds.delete(id);
+    if (activeMaterialId === id) activeMaterialId = selectedMaterials()[0]?.id || '';
+  } else {
+    selectedMaterialIds.add(id);
+    activeMaterialId = id;
+  }
+  topicCache = [];
+  saveMaterials();
+  render();
+  $('#quiz-topic').disabled = selectedMaterials().length > 1;
+  $('#quiz-topic').innerHTML = selectedMaterials().length > 1
+    ? `<option value="">Mixed topics · ${selectedMaterials().length} sources</option>`
+    : '<option value="">Mixed topics</option>';
+  if (!$('#quiz-page').classList.contains('hidden')) loadQuizTopics();
+  if (!$('#dashboard-page').classList.contains('hidden')) loadDashboard();
+  status.textContent = `${selectedMaterials().length} source${selectedMaterials().length === 1 ? '' : 's'} selected for tutor and quiz.`;
 }
 
 function showView(view) {
@@ -408,9 +528,8 @@ function addTutorAnswer(result) {
     card.className = 'citation-card';
     const title = document.createElement('b');
     const location = citationLocation(citation);
-    title.textContent = location
-      ? `${currentMaterial()?.name || 'Uploaded material'} · ${location}`
-      : (currentMaterial()?.name || 'Uploaded material');
+    const sourceName = citationSourceName(citation);
+    title.textContent = location ? `${sourceName} · ${location}` : sourceName;
     const excerpt = document.createElement('blockquote');
     excerpt.textContent = citation.text || '';
     const similarity = document.createElement('span');
@@ -427,58 +546,85 @@ function addTutorAnswer(result) {
   wrapper.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
 }
 
-async function upload(file) {
-  if (!file) return;
-  status.classList.remove('error');
-  const selectedType = materialType(file.name);
-  if (!selectedType) {
-    status.classList.add('error');
-    status.textContent = 'Supported files: PDF, PPTX, MP4, MOV, MKV, WEBM, and M4V.';
-    input.value = '';
+async function uploadFiles(fileList) {
+  const files = Array.from(fileList || []);
+  if (!files.length) return;
+  if (uploadingFiles) {
+    status.textContent = 'Please wait for the current uploads to finish.';
     return;
   }
-  status.textContent = `Uploading and processing ${file.name}…`;
-  const form = new FormData();
-  form.append('file', file);
+  uploadingFiles = true;
+  $('#choose-file').disabled = true;
+  status.classList.remove('error');
+  const errors = [];
+  let uploaded = 0;
   try {
-    const result = await api('/api/materials/upload', { method: 'POST', body: form });
-    const type = materialType(file.name, result.file_type) || selectedType;
-    const unitCount = Number(result.units_processed ?? result.pages_processed ?? result.chunks_created ?? 0);
-    const material = {
-      id: result.material_id,
-      name: file.name,
-      type,
-      uploaded_at: new Date().toISOString(),
-      unit_count: unitCount,
-      unit_label: result.unit || defaultUnit(type),
-      topics: [],
-    };
-    sources = [material, ...sources.filter((item) => item.id !== material.id)];
-    activeMaterialId = material.id;
-    saveMaterials();
-    render();
-    const chunkCount = Number(result.chunks_created) || 0;
-    status.textContent = `Added ${file.name} — ${unitCount} ${countedUnit(material.unit_label, unitCount)} processed${chunkCount ? `, ${chunkCount} chunks created` : ''}.`;
-  } catch (error) {
-    status.classList.add('error');
-    status.textContent = error.message;
+    for (let index = 0; index < files.length; index += 1) {
+      const file = files[index];
+      const selectedType = materialType(file.name);
+      if (!selectedType) {
+        errors.push(`${file.name}: unsupported format`);
+        continue;
+      }
+      if (file.size > 25 * 1024 * 1024) {
+        errors.push(`${file.name}: larger than 25 MB`);
+        continue;
+      }
+      status.textContent = `Uploading ${index + 1} of ${files.length}: ${file.name}…`;
+      const form = new FormData();
+      form.append('file', file);
+      try {
+        const result = await api('/api/materials/upload', { method: 'POST', body: form });
+        const type = materialType(file.name, result.file_type) || selectedType;
+        const unitCount = Number(result.units_processed ?? result.pages_processed ?? result.chunks_created ?? 0);
+        const material = {
+          id: result.material_id,
+          name: file.name,
+          type,
+          uploaded_at: new Date().toISOString(),
+          unit_count: unitCount,
+          unit_label: result.unit || defaultUnit(type),
+          topics: [],
+        };
+        sources = [material, ...sources.filter((item) => item.id !== material.id)];
+        activeMaterialId = material.id;
+        selectedMaterialIds.add(material.id);
+        saveMaterials();
+        render();
+        uploaded += 1;
+      } catch (error) {
+        errors.push(`${file.name}: ${error.message}`);
+      }
+    }
+    if (errors.length) {
+      status.classList.add('error');
+      status.textContent = `${uploaded} of ${files.length} uploaded. ${errors.join(' · ')}`;
+    } else {
+      status.textContent = files.length === 1
+        ? `Added ${files[0].name} successfully.`
+        : `All ${uploaded} files uploaded successfully.`;
+    }
   } finally {
+    uploadingFiles = false;
+    $('#choose-file').disabled = false;
     input.value = '';
   }
 }
 
 async function generateQuiz({ topicId = '', difficulty = $('#quiz-difficulty').value } = {}) {
-  const material = requireMaterial();
+  const materials = requireMaterials();
+  const material = materials[0];
   $('#quiz-status').textContent = 'Building a quiz from your uploaded material…';
   $('#quiz-form').classList.add('hidden');
   $('#quiz-results').classList.add('hidden');
   const request = {
-    material_id: material.id,
+    material_ids: materials.map((item) => item.id),
     difficulty,
     number_of_questions: Number($('#quiz-count').value),
     user_id: USER_ID,
   };
-  if (topicId || $('#quiz-topic').value) request.topic_id = topicId || $('#quiz-topic').value;
+  if (materials.length === 1) request.material_id = material.id;
+  if (materials.length === 1 && (topicId || $('#quiz-topic').value)) request.topic_id = topicId || $('#quiz-topic').value;
   const quiz = await api('/api/quiz/generate', jsonOptions(request));
   activeQuizId = quiz.quiz_id;
   activeQuizQuestions = quiz.questions || [];
@@ -525,7 +671,7 @@ function optionText(options, letter) {
 function renderQuizResults(result) {
   const cards = (result.results || []).map((item, index) => {
     const correct = Boolean(item.is_correct);
-    const materialName = currentMaterial()?.name || 'Uploaded material';
+    const materialName = citationSourceName(item);
     const location = citationLocation(item);
     const citation = location ? `${materialName} · ${location}` : materialName;
     return `<article class="result-question ${correct ? 'correct' : 'incorrect'}"><div class="question-top"><span>QUESTION ${index + 1} · ${escapeHtml(item.topic || 'Topic')}</span><b>${correct ? 'Correct' : 'Review this'}</b></div><h2>${escapeHtml(item.question)}</h2><p><strong>Your answer:</strong> ${escapeHtml(optionText(item.options, item.your_answer))}</p><p><strong>Correct answer:</strong> ${escapeHtml(optionText(item.options, item.correct_answer))}</p><blockquote>${escapeHtml(item.explanation || 'Review the cited material for the explanation.')}</blockquote><span class="result-citation">${escapeHtml(citation)}</span></article>`;
@@ -542,13 +688,13 @@ function renderQuizResults(result) {
   });
 }
 
-$('#choose-file').addEventListener('click', () => input.click());
-input.addEventListener('change', () => upload(input.files[0]));
+$('#choose-file').addEventListener('click', () => { if (!uploadingFiles) input.click(); });
+input.addEventListener('change', () => uploadFiles(input.files));
 $('#search-input').addEventListener('input', render);
 document.querySelectorAll('.nav-item[data-view]').forEach((button) => button.addEventListener('click', () => showView(button.dataset.view)));
 for (const eventName of ['dragenter', 'dragover']) zone.addEventListener(eventName, (event) => { event.preventDefault(); zone.classList.add('drag-over'); });
 for (const eventName of ['dragleave', 'drop']) zone.addEventListener(eventName, (event) => { event.preventDefault(); zone.classList.remove('drag-over'); });
-zone.addEventListener('drop', (event) => upload(event.dataTransfer.files[0]));
+zone.addEventListener('drop', (event) => uploadFiles(event.dataTransfer.files));
 
 $('#flashcard-setup').addEventListener('submit', async (event) => {
   event.preventDefault();
@@ -573,6 +719,7 @@ $('#flashcard-review-actions').addEventListener('click', async (event) => {
   button.disabled = true;
   try {
     await api('/api/flashcards/review', jsonOptions({ card_id: card.card_id, known, user_id: USER_ID }));
+    saveFlashcardReview(card, known);
     if (known) flashcardSession.known += 1;
     flashcardSession.index += 1;
     flashcardSession.revealed = false;
@@ -583,6 +730,8 @@ $('#flashcard-review-actions').addEventListener('click', async (event) => {
     button.disabled = false;
   }
 });
+
+renderFlashcardReviewHistory();
 
 $('#mindmap-setup').addEventListener('submit', async (event) => {
   event.preventDefault();
@@ -602,10 +751,9 @@ $('#mindmap-refresh').addEventListener('click', async () => {
 });
 
 document.addEventListener('click', async (event) => {
-  const materialButton = event.target.closest('[data-select-material]');
+  const materialButton = event.target.closest('[data-toggle-material]');
   if (materialButton) {
-    setActiveMaterial(materialButton.dataset.selectMaterial);
-    status.textContent = `Active course: ${currentMaterial()?.name || 'selected'}.`;
+    toggleMaterialSelection(materialButton.dataset.toggleMaterial);
     return;
   }
   const teachButton = event.target.closest('[data-teach-topic]');
@@ -651,8 +799,10 @@ $('#chat-form').addEventListener('submit', async (event) => {
   button.disabled = true;
   button.textContent = '…';
   try {
-    const material = requireMaterial();
-    const result = await api('/api/tutor/ask', jsonOptions({ material_id: material.id, question }));
+    const materials = requireMaterials();
+    const request = { material_ids: materials.map((item) => item.id), question };
+    if (materials.length === 1) request.material_id = materials[0].id;
+    const result = await api('/api/tutor/ask', jsonOptions(request));
     addTutorAnswer(result);
   } catch (error) {
     addTutorAnswer({ grounded: false, answer: error.message, sources: [] });
@@ -744,8 +894,10 @@ $('#dashboard-topic-chips').addEventListener('click', (event) => {
   });
 });
 
+const availableMaterialIds = new Set(sources.map((source) => source.id));
+selectedMaterialIds = new Set([...selectedMaterialIds].filter((id) => availableMaterialIds.has(id)));
+if (!selectedMaterialIds.size && activeMaterialId && availableMaterialIds.has(activeMaterialId)) selectedMaterialIds.add(activeMaterialId);
+if (!selectedMaterialIds.size && sources[0]) selectedMaterialIds.add(sources[0].id);
+if (!selectedMaterialIds.has(activeMaterialId)) activeMaterialId = [...selectedMaterialIds][0] || '';
+saveMaterials();
 render();
-if (!sources.some((source) => source.id === activeMaterialId)) {
-  activeMaterialId = sources[0]?.id || '';
-  saveMaterials();
-}

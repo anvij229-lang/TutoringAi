@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <meta name="theme-color" content="#f6f5f1" />
   <title>Studyroom — your course, connected</title>
-  <link rel="stylesheet" href="/web/styles.css?v=20261014-ui-refresh" />
+  <link rel="stylesheet" href="/web/styles.css?v=20261014-flashcard-history" />
 </head>
 <body>
   <div class="app-shell">
@@ -33,11 +33,11 @@
 
         <section class="upload-card" id="drop-zone">
           <div class="upload-art"><div class="paper paper-back"></div><div class="paper paper-front"><span>↥</span></div><div class="orbit orbit-one"></div><div class="orbit orbit-two"></div></div>
-          <div class="upload-copy"><h2>Start with what you’re studying</h2><p>Upload documents or lecture videos and we’ll connect their pages, slides, and transcript segments to your tutor, quizzes, and progress.</p><div class="upload-actions"><button class="primary-button" id="choose-file"><span>＋</span> Add course material</button><span class="file-hint">PDF, PPTX, MP4, MOV, MKV, WEBM, M4V <span>·</span> up to 25 MB</span></div><div id="upload-status" class="upload-status" role="status" aria-live="polite"></div></div>
-          <input type="file" id="file-input" accept=".pdf,.pptx,.mp4,.mov,.mkv,.webm,.m4v,application/pdf,application/vnd.openxmlformats-officedocument.presentationml.presentation,video/mp4,video/quicktime,video/x-matroska,video/webm,video/x-m4v" hidden />
+          <div class="upload-copy"><h2>Start with what you’re studying</h2><p>Upload documents or lecture videos and we’ll connect their pages, slides, and transcript segments to your tutor, quizzes, and progress.</p><div class="upload-actions"><button class="primary-button" id="choose-file"><span>＋</span> Add course material</button><span class="file-hint">PDF, PPTX, MP4, MOV, MKV, WEBM, M4V <span>·</span> up to 25 MB each <span>·</span> select multiple</span></div><div id="upload-status" class="upload-status" role="status" aria-live="polite"></div></div>
+          <input type="file" id="file-input" multiple accept=".pdf,.pptx,.mp4,.mov,.mkv,.webm,.m4v,application/pdf,application/vnd.openxmlformats-officedocument.presentationml.presentation,video/mp4,video/quicktime,video/x-matroska,video/webm,video/x-m4v" hidden />
         </section>
 
-        <div class="section-heading"><div><h2>Your course sources</h2><p>Each file stays linked to its original location.</p></div><label class="search-box"><span>⌕</span><input id="search-input" type="search" placeholder="Find a source" aria-label="Find a source" /></label></div>
+        <div class="section-heading"><div><h2>Your course sources</h2><p>Select one or more sources to use together in tutor and quizzes. <b id="selected-source-count">0 selected for tutor + quiz</b></p></div><label class="search-box"><span>⌕</span><input id="search-input" type="search" placeholder="Find a source" aria-label="Find a source" /></label></div>
         <div id="source-list" class="source-list"></div>
         <div id="empty-state" class="empty-state"><div class="empty-icon">▤</div><b>Your library is ready for its first source</b><span>Upload slides, a reading, or a lecture transcript to get started.</span></div>
         <footer class="page-footer"><span>Built for focused learning</span><span>Course material stays on this device</span></footer>
@@ -101,6 +101,10 @@
           <button id="flashcard-reveal" class="primary-button" type="button">Reveal answer</button>
           <div id="flashcard-review-actions" class="flashcard-review-actions hidden"><button type="button" class="secondary-button" data-card-review="false">Need to review</button><button type="button" class="primary-button" data-card-review="true">I knew it</button></div>
         </section>
+        <section class="flashcard-history-section" aria-labelledby="flashcard-history-title">
+          <div class="dashboard-section-heading"><div><h2 id="flashcard-history-title">Your reviewed cards</h2><p>Cards you marked as known or needing another review.</p></div></div>
+          <div id="flashcard-review-history" class="flashcard-history-list" aria-live="polite"></div>
+        </section>
       </section>
       <section class="page tool-page mindmap-page hidden" id="mindmap-page">
         <div class="eyebrow">SEE HOW IDEAS CONNECT</div><h1>Topic map.</h1><p class="intro">Explore concepts from your uploaded material and see topic mastery where available.</p>
@@ -115,6 +119,6 @@
     </main>
   </div>
   <div class="toast" id="toast" role="status"></div>
-  <script src="/web/app.js?v=20261014-ui-refresh"></script>
+  <script src="/web/app.js?v=20261014-flashcard-history"></script>
 </body>
 </html>
