@@ -41,6 +41,7 @@ def run(function, *args):
 @router.post("/generate")
 def generate(request: GenerateRequest):
     return run(
+        generate_flashcards,
         merge_ids(request.material_ids, request.material_id),
         request.material_id,
         request.topic_id,
