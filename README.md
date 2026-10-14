@@ -2,6 +2,10 @@
 
 Studyroom is a course study companion. Upload course PDFs, PowerPoint slides, or lecture videos, then study with source-grounded tutor answers, quizzes, flashcards, topic maps, and progress views.
 
+## Frontend preview
+
+![Studyroom course library frontend](docs/images/frontend-course-library.png)
+
 ## Prerequisites
 
 - Git
