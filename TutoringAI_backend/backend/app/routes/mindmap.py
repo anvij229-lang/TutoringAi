@@ -36,11 +36,10 @@ def generate(request: GenerateRequest):
     return run(
         generate_mindmap,
         merge_ids(request.material_ids, request.material_id),
-        request.material_id,
         request.topic_id,
         request.refresh,
         request.user_id.strip() or "demo",
-    )
+)
 
 
 @router.get("/{material_id}")
