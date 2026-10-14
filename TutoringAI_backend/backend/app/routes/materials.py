@@ -93,3 +93,20 @@ def get_chunks(material_id: str):
         }
         for r in rows
     ]
+
+@router.delete("/{material_id}")
+def delete_material(material_id: str):
+    try:
+        uuid.UUID(material_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid material id")
+
+    with get_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute("DELETE FROM materials WHERE id = %s::uuid RETURNING id", (material_id,))
+            row = cur.fetchone()
+        conn.commit()
+
+    if row is None:
+        raise HTTPException(status_code=404, detail="Material not found")
+    return {"deleted": material_id}

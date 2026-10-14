@@ -2,7 +2,7 @@ from app.services.evaluator import submit_quiz
 from app.services.quiz_generator import generate_quiz
 from app.services.topics import get_or_detect_topics
 
-MATERIAL_ID = "18475e52-416f-4d69-9448-2a71207d913c"
+MATERIAL_ID = "2e41b585-8ce7-418c-9c1f-ccbc5997c155"
 
 topics = get_or_detect_topics(MATERIAL_ID)
 print("TOPICS:")

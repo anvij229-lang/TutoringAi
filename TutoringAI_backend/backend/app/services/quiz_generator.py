@@ -6,7 +6,9 @@ import uuid
 from app.database.db import get_connection
 from app.services.llm import chat
 from app.services.rag import retrieve_chunks
-from app.services.topics import get_or_detect_topics
+from app.services.selection import resolve_selection
+from app.services.topics import balanced_sample, get_topics_for
+from app.utils.citations import with_file_name
 from app.utils.json_utils import parse_json
 from app.utils.prompts import QUIZ_PROMPT
 from app.services.learner_model import auto_difficulty
@@ -19,27 +21,24 @@ MAX_TOPICS_PER_QUIZ = 4
 LETTERS = ["A", "B", "C", "D"]
 
 
-def select_topics(material_id: str, topic_id, number_of_questions: int):
-    topics = get_or_detect_topics(material_id)
+def select_topics(ids: list, topic_id, number_of_questions: int):
+    topics = get_topics_for(ids)
     if topic_id:
         chosen = [t for t in topics if t["id"] == topic_id]
         if not chosen:
-            raise LookupError("Topic not found for this material")
+            raise LookupError("Topic not found in the selected materials")
         return chosen
     limit = min(len(topics), MAX_TOPICS_PER_QUIZ, number_of_questions)
-    return random.sample(topics, limit)
+    return balanced_sample(topics, limit, True)
 
 
-def build_context(material_id: str, topics: list) -> str:
+def build_context(topics: list) -> str:
     per_topic = 6 if len(topics) == 1 else 3
     blocks = []
     for topic in topics:
         query = f"{topic['name']}. {topic['description'] or ''}"
-        chunks = retrieve_chunks(material_id, query, top_k=per_topic)
-        for chunk in chunks:
-            blocks.append(
-                f"[Topic: {topic['name']} | {chunk['label']}]\n{chunk['text']}"
-            )
+        for chunk in retrieve_chunks(topic["material_id"], query, top_k=per_topic):
+            blocks.append(f"[Topic: {topic['label']} | {chunk['label']}]\n{chunk['text']}")
     return "\n\n".join(blocks)
 
 
@@ -86,7 +85,7 @@ def validate_question(item, topic_names: list):
     }
 
 
-def generate_quiz(material_id: str, topic_id, difficulty: str, number_of_questions: int, user_id: str = "demo"):
+def generate_quiz(material_ids, topic_id, difficulty: str, number_of_questions: int, user_id: str = "demo"):
     difficulty = difficulty.strip().lower()
     if difficulty != "auto" and difficulty not in VALID_DIFFICULTIES:
         raise ValueError("difficulty must be auto, easy, medium or hard")
@@ -96,22 +95,27 @@ def generate_quiz(material_id: str, topic_id, difficulty: str, number_of_questio
         )
 
     try:
-        uuid.UUID(material_id)
         if topic_id:
             topic_id = str(uuid.UUID(topic_id))
     except ValueError:
-        raise ValueError("Invalid material_id or topic_id")
+        raise ValueError("Invalid topic_id")
 
-    topics = select_topics(material_id, topic_id, number_of_questions)
+    selection = resolve_selection(material_ids)
+    ids = [item["id"] for item in selection]
+    multi = len(ids) > 1
+    materials = [{"id": item["id"], "title": item["title"]} for item in selection]
+
+    topics = select_topics(ids, topic_id, number_of_questions)
     adaptive = difficulty == "auto"
     if adaptive:
         difficulty = auto_difficulty(user_id, [t["id"] for t in topics])
-    context = build_context(material_id, topics)
+
+    context = build_context(topics)
     if not context.strip():
         raise ValueError("Not enough material to build a quiz")
 
-    topic_names = [t["name"] for t in topics]
-    topic_ids = {t["name"]: t["id"] for t in topics}
+    topic_names = [t["label"] for t in topics]
+    by_label = {t["label"]: t for t in topics}
 
     user_prompt = (
         f"Difficulty: {difficulty}\n"
@@ -142,13 +146,15 @@ def generate_quiz(material_id: str, topic_id, difficulty: str, number_of_questio
     with get_connection() as conn:
         with conn.cursor() as cur:
             cur.execute(
-                "INSERT INTO quizzes (material_id, topic_id, difficulty) "
-                "VALUES (%s::uuid, %s::uuid, %s) RETURNING id",
-                (material_id, topic_id, difficulty),
+                "INSERT INTO quizzes (material_id, material_ids, topic_id, difficulty) "
+                "VALUES (%s::uuid, %s::uuid[], %s::uuid, %s) RETURNING id",
+                (ids[0], ids, topic_id, difficulty),
             )
             quiz_id = str(cur.fetchone()[0])
 
             for position, q in enumerate(questions):
+                topic = by_label[q["topic"]]
+                source = with_file_name(q.get("source"), topic["material_title"], multi)
                 cur.execute(
                     "INSERT INTO questions "
                     "(quiz_id, topic_id, position, question, question_type, difficulty, "
@@ -157,7 +163,7 @@ def generate_quiz(material_id: str, topic_id, difficulty: str, number_of_questio
                     "RETURNING id",
                     (
                         quiz_id,
-                        topic_ids[q["topic"]],
+                        topic["id"],
                         position,
                         q["question"],
                         difficulty,
@@ -165,13 +171,14 @@ def generate_quiz(material_id: str, topic_id, difficulty: str, number_of_questio
                         q["answer"],
                         q["explanation"],
                         q["page"],
-                        q["source"],
+                        source,
                     ),
                 )
                 output.append(
                     {
                         "question_id": str(cur.fetchone()[0]),
                         "topic": q["topic"],
+                        "material_title": topic["material_title"],
                         "question": q["question"],
                         "options": q["options"],
                     }
@@ -180,7 +187,9 @@ def generate_quiz(material_id: str, topic_id, difficulty: str, number_of_questio
 
     return {
         "quiz_id": quiz_id,
-        "material_id": material_id,
+        "material_id": ids[0],
+        "material_ids": ids,
+        "materials": materials,
         "adaptive": adaptive,
         "difficulty": difficulty,
         "topics": topic_names,

@@ -2,7 +2,7 @@ import re
 from app.services.rag import answer_question
 from collections import Counter
 
-MATERIAL_ID = "18475e52-416f-4d69-9448-2a71207d913c"
+MATERIAL_ID = "2e41b585-8ce7-418c-9c1f-ccbc5997c155"
 
 TESTS = [
     # ---------- Direct, covered ----------
@@ -64,7 +64,7 @@ passed = 0
 reasons = Counter()
 for question, should_be_grounded in TESTS:
     result = answer_question(MATERIAL_ID, question)
-    reasons[result["reason"]] += 1
+    reasons[result.get("reason", "not_covered")] += 1
     ok = result["grounded"] == should_be_grounded
 
     if ok and question in EXPECTED_PAGE:
@@ -72,7 +72,7 @@ for question, should_be_grounded in TESTS:
 
     passed += int(ok)
     status = "PASS" if ok else "FAIL"
-    print(f"[{status}] grounded={result['grounded']} ({result['reason']}) | {question}")
+    print(f"[{status}] grounded={result['grounded']} ({result.get('reason', 'n/a')}) | {question}")
     print(f"        {result['answer'][:150]}")
     if not ok and question in EXPECTED_PAGE:
         print(f"        FULL ANSWER: {result['answer']}")

@@ -71,7 +71,8 @@ def submit_quiz(quiz_id: str, answers: list, user_id: str = "demo"):
                 topic_name = row[7] or "General"
 
                 stats = topic_stats.setdefault(
-                    topic_name, {"topic_id": row[6], "correct": 0, "total": 0}
+                    str(row[6] or topic_name),
+                    {"name": topic_name, "topic_id": row[6], "correct": 0, "total": 0},
                 )
                 stats["total"] += 1
                 if is_correct:
@@ -102,7 +103,8 @@ def submit_quiz(quiz_id: str, answers: list, user_id: str = "demo"):
             weak_topics = []
             developing_topics = []
             strong_topics = []
-            for name, stats in topic_stats.items():
+            for stats in topic_stats.values():
+                name = stats["name"]
                 accuracy = round(stats["correct"] * 100 / stats["total"])
                 status = topic_status(accuracy)
                 if status == "weak":

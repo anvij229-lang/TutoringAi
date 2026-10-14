@@ -29,3 +29,8 @@ def source_label(file_type, page_number, start_seconds) -> str:
     if file_type == "pptx":
         return f"Slide {page_number}"
     return f"Page {page_number}"
+
+def with_file_name(label, title, multi: bool):
+    if not label or not multi or not title:
+        return label
+    return f"{title}, {label}"

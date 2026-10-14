@@ -3,13 +3,15 @@ from pydantic import BaseModel
 
 from app.services.evaluator import submit_quiz
 from app.services.quiz_generator import generate_quiz
-from app.services.topics import get_or_detect_topics
+from app.services.topics import get_topics_for
+from app.services.selection import merge_ids
 
 router = APIRouter(prefix="/api/quiz", tags=["quiz"])
 
 
 class GenerateRequest(BaseModel):
-    material_id: str
+    material_id: str | None = None
+    material_ids: list[str] | None = None
     topic_id: str | None = None
     difficulty: str = "auto"
     number_of_questions: int = 5
@@ -45,14 +47,14 @@ def run(function, *args):
 
 @router.get("/topics/{material_id}")
 def list_topics(material_id: str):
-    return {"material_id": material_id, "topics": run(get_or_detect_topics, material_id)}
+    return {"material_id": material_id, "topics": run(get_topics_for, material_id)}
 
 
 @router.post("/generate")
 def generate(request: GenerateRequest):
     return run(
         generate_quiz,
-        request.material_id,
+        merge_ids(request.material_ids, request.material_id),
         request.topic_id,
         request.difficulty,
         request.number_of_questions,

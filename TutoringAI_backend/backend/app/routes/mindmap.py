@@ -2,12 +2,14 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
 from app.services.mindmap import generate_mindmap, get_mindmap
+from app.services.selection import merge_ids
 
 router = APIRouter(prefix="/api/mindmap", tags=["mindmap"])
 
 
 class GenerateRequest(BaseModel):
-    material_id: str
+    material_id: str | None = None
+    material_ids: list[str] | None = None
     topic_id: str | None = None
     refresh: bool = False
     user_id: str = "demo"
@@ -32,7 +34,7 @@ def run(function, *args):
 @router.post("/generate")
 def generate(request: GenerateRequest):
     return run(
-        generate_mindmap,
+        merge_ids(request.material_ids, request.material_id),
         request.material_id,
         request.topic_id,
         request.refresh,

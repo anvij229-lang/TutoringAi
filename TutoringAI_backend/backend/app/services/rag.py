@@ -1,10 +1,10 @@
-from app.utils.citations import source_label
 import os
-import uuid
 import re
 from app.database.db import get_connection
 from app.services.embeddings import create_embedding
 from app.services.llm import chat
+from app.services.selection import resolve_selection, safe_title
+from app.utils.citations import source_label
 from app.utils.prompts import GROUNDING_PROMPT
 
 NOT_COVERED_MSG = "This topic isn't covered in your uploaded material."
@@ -21,14 +21,16 @@ def clean_query(q: str) -> str:
     return re.sub(r"^which page (covers|describes|lists|says)\s+", "", q, flags=re.I)
 
 
-def retrieve_chunks(material_id: str, question: str, top_k: int = 5):
+def retrieve_chunks(material_ids, question: str, top_k: int = 5):
+    ids = [material_ids] if isinstance(material_ids, str) else list(material_ids)
     embedding = create_embedding(question)
     with get_connection() as conn:
         with conn.cursor() as cur:
             cur.execute(
-                "SELECT content, page_number, start_seconds, file_type, similarity "
-                "FROM match_chunks(%s::vector, %s::uuid, %s)",
-                (str(embedding), material_id, top_k),
+                "SELECT content, page_number, start_seconds, file_type, similarity, "
+                "material_id, material_title "
+                "FROM match_chunks_multi(%s::vector, %s::uuid[], %s)",
+                (str(embedding), ids, top_k),
             )
             rows = cur.fetchall()
     return [
@@ -39,43 +41,44 @@ def retrieve_chunks(material_id: str, question: str, top_k: int = 5):
             "file_type": row[3],
             "label": source_label(row[3], row[1], row[2]),
             "similarity": float(row[4]),
+            "material_id": str(row[5]),
+            "material_title": safe_title(row[6]),
         }
         for row in rows
     ]
 
 
-def answer_question(material_id: str, question: str):
-    try:
-        uuid.UUID(material_id)
-    except ValueError:
-        raise ValueError("Invalid material_id")
+def format_passage(chunk: dict, multi: bool) -> str:
+    if multi:
+        return f"[{chunk['material_title']} | {chunk['label']}]\n{chunk['text']}"
+    return f"[{chunk['label']}]\n{chunk['text']}"
 
+
+def answer_question(material_ids, question: str):
     if len(question) > MAX_QUESTION_LENGTH:
         raise ValueError(f"Question is too long (max {MAX_QUESTION_LENGTH} characters)")
 
-    if not material_exists(material_id):
-        raise LookupError("Material not found")
+    selection = resolve_selection(material_ids)
+    ids = [item["id"] for item in selection]
+    multi = len(ids) > 1
+    materials = [{"id": item["id"], "title": item["title"]} for item in selection]
 
     threshold = float(os.getenv("SIMILARITY_THRESHOLD", "0.30"))
-    chunks = retrieve_chunks(material_id, clean_query(question))
-    print("similarities:", [round(c["similarity"], 3) for c in chunks])  # remove after tuning
+    chunks = retrieve_chunks(ids, question, top_k=8 if multi else 5)
+    relevant = [chunk for chunk in chunks if chunk["similarity"] >= threshold]
 
-    # Layer 1: similarity threshold
-    relevant = [c for c in chunks if c["similarity"] >= threshold]
     if not relevant:
-        return {"answer": NOT_COVERED_MSG, "grounded": False, "sources": [],
-                "reason": "below_threshold"}
+        return {"answer": NOT_COVERED_MSG, "grounded": False, "sources": [], "materials": materials}
 
-    # Build context with page labels
-    context = "\n\n".join(f"[{c['label']}]\n{c['text']}" for c in relevant)
+    for chunk in relevant:
+        chunk["citation"] = (
+            f"{chunk['material_title']}, {chunk['label']}" if multi else chunk["label"]
+        )
+
+    context = "\n\n".join(format_passage(chunk, multi) for chunk in relevant)
     answer = chat(GROUNDING_PROMPT, f"Context:\n{context}\n\nQuestion: {question}")
 
-    # Layer 2: the LLM says the context doesn't answer it
-    if answer.strip().lstrip("*_\"' `").upper().startswith("NOT_COVERED"):
-        return {"answer": NOT_COVERED_MSG, "grounded": False, "sources": [],
-                "reason": "llm_not_covered"}
+    if answer.upper().startswith("NOT_COVERED"):
+        return {"answer": NOT_COVERED_MSG, "grounded": False, "sources": [], "materials": materials}
 
-    return {"answer": answer, "grounded": True, "sources": relevant, "reason": "answered"}
-
-
-    return {"answer": answer, "grounded": True, "sources": relevant, "reason": "answered"}
+    return {"answer": answer, "grounded": True, "sources": relevant, "materials": materials}

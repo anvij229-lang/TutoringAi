@@ -5,6 +5,9 @@ from app.services.llm import chat
 from app.services.rag import material_exists
 from app.utils.json_utils import parse_json
 from app.utils.prompts import TOPIC_PROMPT
+import random
+
+from app.services.selection import resolve_selection, safe_title
 
 MAX_CONTEXT_CHARS = 12000
 
@@ -85,3 +88,45 @@ def get_or_detect_topics(material_id: str):
     if topics:
         return topics
     return detect_topics(material_id)
+
+def get_topics_for(material_ids) -> list:
+    selection = resolve_selection(material_ids)
+    topics = []
+    for item in selection:
+        for topic in get_or_detect_topics(item["id"]):
+            topics.append(
+                {**topic, "material_id": item["id"], "material_title": item["title"]}
+            )
+
+    counts = {}
+    for topic in topics:
+        key = topic["name"].lower()
+        counts[key] = counts.get(key, 0) + 1
+
+    for topic in topics:
+        if counts[topic["name"].lower()] > 1:
+            topic["label"] = f"{topic['name']} ({safe_title(topic['material_title'])[:24]})"
+        else:
+            topic["label"] = topic["name"]
+    return topics
+
+
+def balanced_sample(topics: list, limit: int, shuffle: bool = False) -> list:
+    groups = {}
+    for topic in topics:
+        groups.setdefault(topic["material_id"], []).append(topic)
+
+    queues = list(groups.values())
+    if shuffle:
+        for queue in queues:
+            random.shuffle(queue)
+        random.shuffle(queues)
+
+    picked = []
+    index = 0
+    while len(picked) < limit and any(queues):
+        queue = queues[index % len(queues)]
+        if queue:
+            picked.append(queue.pop(0))
+        index += 1
+    return picked

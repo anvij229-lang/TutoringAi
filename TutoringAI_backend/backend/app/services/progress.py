@@ -1,5 +1,6 @@
 from app.database.db import get_connection
 from app.services.learner_model import START_MASTERY, difficulty_for, mastery_status
+from app.services.selection import parse_ids
 
 
 def recommend_next(topics: list) -> dict:
@@ -50,7 +51,8 @@ def recommend_next(topics: list) -> dict:
     }
 
 
-def get_progress(user_id: str, material_id: str | None = None) -> dict:
+def get_progress(user_id: str, material_ids=None) -> dict:
+    ids = parse_ids(material_ids) or None
     with get_connection() as conn:
         with conn.cursor() as cur:
             cur.execute(
@@ -58,9 +60,9 @@ def get_progress(user_id: str, material_id: str | None = None) -> dict:
                 "m.questions_attempted, m.questions_correct, m.last_updated "
                 "FROM topics t "
                 "LEFT JOIN mastery m ON m.topic_id = t.id AND m.user_id = %s "
-                "WHERE (%s::uuid IS NULL OR t.material_id = %s::uuid) "
+                "WHERE (%s::uuid[] IS NULL OR t.material_id = ANY(%s::uuid[])) "
                 "ORDER BY t.name",
-                (user_id, material_id, material_id),
+                (user_id, ids, ids),
             )
             topic_rows = cur.fetchall()
 
@@ -71,18 +73,18 @@ def get_progress(user_id: str, material_id: str | None = None) -> dict:
                 "JOIN quizzes qz ON qz.id = a.quiz_id "
                 "JOIN materials mt ON mt.id = qz.material_id "
                 "LEFT JOIN topics t ON t.id = qz.topic_id "
-                "WHERE a.user_id = %s AND (%s::uuid IS NULL OR qz.material_id = %s::uuid) "
+                "WHERE a.user_id = %s AND (%s::uuid[] IS NULL OR qz.material_ids && %s::uuid[]) "
                 "ORDER BY a.created_at DESC LIMIT 10",
-                (user_id, material_id, material_id),
+                (user_id, ids, ids),
             )
             attempt_rows = cur.fetchall()
 
             cur.execute(
                 "SELECT h.topic_id, t.name, h.mastery_before, h.mastery_after, h.created_at "
                 "FROM mastery_history h JOIN topics t ON t.id = h.topic_id "
-                "WHERE h.user_id = %s AND (%s::uuid IS NULL OR t.material_id = %s::uuid) "
+                "WHERE h.user_id = %s AND (%s::uuid[] IS NULL OR t.material_id = ANY(%s::uuid[])) "
                 "ORDER BY h.created_at DESC LIMIT 30",
-                (user_id, material_id, material_id),
+                (user_id, ids, ids),
             )
             history_rows = cur.fetchall()
 

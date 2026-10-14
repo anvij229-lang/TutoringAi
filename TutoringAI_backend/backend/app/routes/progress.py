@@ -3,20 +3,22 @@ import uuid
 from fastapi import APIRouter, HTTPException
 
 from app.services.progress import get_progress
+from app.services.selection import merge_ids
 
 router = APIRouter(prefix="/api/progress", tags=["progress"])
 
 
 @router.get("/{user_id}")
-def progress(user_id: str, material_id: str | None = None):
+def progress(user_id: str, material_ids: str | None = None, material_id: str | None = None):
     user_id = user_id.strip() or "demo"
-    if material_id:
+    ids = merge_ids(material_ids, material_id)
+    for value in ids:
         try:
-            uuid.UUID(material_id)
+            uuid.UUID(value)
         except ValueError:
-            raise HTTPException(status_code=400, detail="Invalid material_id")
+            raise HTTPException(status_code=400, detail="Invalid material id")
     try:
-        return get_progress(user_id, material_id)
+        return get_progress(user_id, ids)
     except RuntimeError as error:
         raise HTTPException(status_code=500, detail=str(error))
     except Exception:

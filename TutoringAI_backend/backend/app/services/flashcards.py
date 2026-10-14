@@ -5,7 +5,9 @@ from app.database.db import get_connection
 from app.services.learner_model import WEAK_MAX
 from app.services.llm import chat
 from app.services.rag import retrieve_chunks
-from app.services.topics import get_or_detect_topics
+from app.services.selection import resolve_selection
+from app.services.topics import balanced_sample, get_topics_for
+from app.utils.citations import with_file_name
 from app.utils.json_utils import normalize_text, parse_json
 from app.utils.prompts import FLASHCARD_PROMPT
 from app.utils.citations import clean_source_label
@@ -19,44 +21,46 @@ def chunk_label(chunk: dict) -> str:
     return chunk.get("label") or f"Page {chunk['page']}"
 
 
-def weak_topic_ids(user_id: str, material_id: str) -> list:
+def weak_topic_ids(user_id: str, material_ids: list) -> list:
     with get_connection() as conn:
         with conn.cursor() as cur:
             cur.execute(
                 "SELECT m.topic_id FROM mastery m JOIN topics t ON t.id = m.topic_id "
-                "WHERE m.user_id = %s AND t.material_id = %s::uuid AND m.mastery_score <= %s "
-                "ORDER BY m.mastery_score",
-                (user_id, material_id, WEAK_MAX),
+                "WHERE m.user_id = %s AND t.material_id = ANY(%s::uuid[]) "
+                "AND m.mastery_score <= %s ORDER BY m.mastery_score",
+                (user_id, material_ids, WEAK_MAX),
             )
             return [str(row[0]) for row in cur.fetchall()]
 
 
-def select_topics(material_id: str, topic_id, user_id: str, weak_only: bool, count: int):
-    topics = get_or_detect_topics(material_id)
+def select_topics(ids: list, topic_id, user_id: str, weak_only: bool, count: int):
+    topics = get_topics_for(ids)
     by_id = {t["id"]: t for t in topics}
 
     if topic_id:
         if topic_id not in by_id:
-            raise LookupError("Topic not found for this material")
+            raise LookupError("Topic not found in the selected materials")
         return [by_id[topic_id]]
 
     if weak_only:
-        weak = [by_id[i] for i in weak_topic_ids(user_id, material_id) if i in by_id]
+        weak = [by_id[i] for i in weak_topic_ids(user_id, ids) if i in by_id]
         if not weak:
-            raise ValueError("No weak topics yet. Take a quiz first, or choose a topic.")
+            raise ValueError(
+                "No weak topics yet in the selected materials. Take a quiz first, or choose a topic."
+            )
         return weak[:MAX_TOPICS]
 
-    return random.sample(topics, min(len(topics), MAX_TOPICS, count))
+    return balanced_sample(topics, min(len(topics), MAX_TOPICS, count), True)
 
 
-def build_context(material_id: str, topics: list) -> str:
+def build_context(topics: list) -> str:
     per_topic = 6 if len(topics) == 1 else 4
     blocks = []
     for topic in topics:
         query = f"{topic['name']}. {topic['description'] or ''}"
-        for chunk in retrieve_chunks(material_id, query, top_k=per_topic):
+        for chunk in retrieve_chunks(topic["material_id"], query, top_k=per_topic):
             blocks.append(
-                f"[Topic: {topic['name']} | {chunk_label(chunk)}]\n{chunk['text'][:700]}"
+                f"[Topic: {topic['label']} | {chunk_label(chunk)}]\n{chunk['text'][:700]}"
             )
     return "\n\n".join(blocks)
 
@@ -77,9 +81,8 @@ def validate_card(item, topic_names: list):
     source = clean_source_label(item.get("source"))
     return {"topic": topic, "front": front, "back": back, "source": source}
 
-
 def generate_flashcards(
-    material_id: str,
+    material_ids,
     topic_id,
     number_of_cards: int,
     user_id: str = "demo",
@@ -89,19 +92,22 @@ def generate_flashcards(
         raise ValueError(f"number_of_cards must be between {MIN_CARDS} and {MAX_CARDS}")
 
     try:
-        uuid.UUID(material_id)
         if topic_id:
             topic_id = str(uuid.UUID(topic_id))
     except ValueError:
-        raise ValueError("Invalid material_id or topic_id")
+        raise ValueError("Invalid topic_id")
 
-    topics = select_topics(material_id, topic_id, user_id, weak_only, number_of_cards)
-    context = build_context(material_id, topics)
+    selection = resolve_selection(material_ids)
+    ids = [item["id"] for item in selection]
+    multi = len(ids) > 1
+
+    topics = select_topics(ids, topic_id, user_id, weak_only, number_of_cards)
+    context = build_context(topics)
     if not context.strip():
         raise ValueError("Not enough material to build flashcards")
 
-    topic_names = [t["name"] for t in topics]
-    topic_ids = {t["name"]: t["id"] for t in topics}
+    topic_names = [t["label"] for t in topics]
+    by_label = {t["label"]: t for t in topics}
 
     user_prompt = (
         f"Number of cards: {number_of_cards}\n"
@@ -146,73 +152,71 @@ def generate_flashcards(
     with get_connection() as conn:
         with conn.cursor() as cur:
             cur.execute(
-                "INSERT INTO flashcard_sets (material_id, topic_id, user_id, mode) "
-                "VALUES (%s::uuid, %s::uuid, %s, %s) RETURNING id",
-                (material_id, topic_id, user_id, mode),
+                "INSERT INTO flashcard_sets (material_id, material_ids, topic_id, user_id, mode) "
+                "VALUES (%s::uuid, %s::uuid[], %s::uuid, %s, %s) RETURNING id",
+                (ids[0], ids, topic_id, user_id, mode),
             )
             set_id = str(cur.fetchone()[0])
 
             for position, card in enumerate(cards):
+                topic = by_label[card["topic"]]
+                source = with_file_name(card["source"], topic["material_title"], multi)
                 cur.execute(
                     "INSERT INTO flashcards "
                     "(set_id, topic_id, position, front, back, source_label) "
                     "VALUES (%s::uuid, %s::uuid, %s, %s, %s, %s) RETURNING id",
-                    (
-                        set_id,
-                        topic_ids[card["topic"]],
-                        position,
-                        card["front"],
-                        card["back"],
-                        card["source"],
-                    ),
+                    (set_id, topic["id"], position, card["front"], card["back"], source),
                 )
                 output.append(
                     {
                         "card_id": str(cur.fetchone()[0]),
-                        "topic": card["topic"],
-                        "topic_id": topic_ids[card["topic"]],
+                        "topic": topic["name"],
+                        "topic_id": topic["id"],
+                        "material_title": topic["material_title"],
                         "front": card["front"],
                         "back": card["back"],
-                        "source": card["source"],
+                        "source": source,
                     }
                 )
         conn.commit()
 
     return {
         "set_id": set_id,
-        "material_id": material_id,
+        "material_id": ids[0],
+        "material_ids": ids,
         "mode": mode,
         "topics": topic_names,
         "cards": output,
     }
 
-
-def get_flashcards(material_id: str, topic_id=None, user_id: str = "demo"):
+def get_flashcards(material_ids, topic_id=None, user_id: str = "demo"):
     try:
-        uuid.UUID(material_id)
         if topic_id:
             topic_id = str(uuid.UUID(topic_id))
     except ValueError:
-        raise ValueError("Invalid material_id or topic_id")
+        raise ValueError("Invalid topic_id")
+
+    ids = [item["id"] for item in resolve_selection(material_ids)]
 
     with get_connection() as conn:
         with conn.cursor() as cur:
             cur.execute(
                 "SELECT id, mode, created_at FROM flashcard_sets "
-                "WHERE material_id = %s::uuid AND user_id = %s "
+                "WHERE material_ids = %s::uuid[] AND user_id = %s "
                 "AND (%s::uuid IS NULL OR topic_id = %s::uuid) "
                 "ORDER BY created_at DESC LIMIT 1",
-                (material_id, user_id, topic_id, topic_id),
+                (ids, user_id, topic_id, topic_id),
             )
             row = cur.fetchone()
             if row is None:
-                raise LookupError("No flashcards yet. Generate a set first.")
+                raise LookupError("No flashcards yet for this selection. Generate a set first.")
             set_id, mode, created_at = row
 
             cur.execute(
-                "SELECT c.id, c.front, c.back, c.source_label, t.id, t.name, r.known "
+                "SELECT c.id, c.front, c.back, c.source_label, t.id, t.name, mt.title, r.known "
                 "FROM flashcards c "
                 "LEFT JOIN topics t ON t.id = c.topic_id "
+                "LEFT JOIN materials mt ON mt.id = t.material_id "
                 "LEFT JOIN flashcard_reviews r ON r.card_id = c.id AND r.user_id = %s "
                 "WHERE c.set_id = %s ORDER BY c.position",
                 (user_id, set_id),
@@ -221,7 +225,8 @@ def get_flashcards(material_id: str, topic_id=None, user_id: str = "demo"):
 
     return {
         "set_id": str(set_id),
-        "material_id": material_id,
+        "material_id": ids[0],
+        "material_ids": ids,
         "mode": mode,
         "created_at": created_at.isoformat(),
         "cards": [
@@ -232,7 +237,8 @@ def get_flashcards(material_id: str, topic_id=None, user_id: str = "demo"):
                 "source": r[3],
                 "topic_id": str(r[4]) if r[4] else None,
                 "topic": r[5],
-                "known": r[6],
+                "material_title": r[6],
+                "known": r[7],
             }
             for r in rows
         ],
