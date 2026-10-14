@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <meta name="theme-color" content="#f6f5f1" />
   <title>Studyroom — your course, connected</title>
-  <link rel="stylesheet" href="/web/styles.css" />
+  <link rel="stylesheet" href="/web/styles.css?v=20261014-ui-refresh" />
 </head>
 <body>
   <div class="app-shell">
@@ -51,7 +51,7 @@
             <form id="chat-form" class="chat-form"><textarea id="question-input" rows="1" placeholder="Ask a question about your course…" aria-label="Ask a question" required></textarea><button type="submit" aria-label="Send question">↑</button></form>
             <div class="chat-footnote">Answers are limited to text found in your uploaded sources.</div>
           </div>
-          <aside class="tutor-sidebar"><div class="side-card"><div class="side-card-icon">⌕</div><b>Where answers come from</b><p>The tutor searches your uploaded pages, slides, and transcript cues, then shows the closest matching passages.</p></div><div class="side-card source-side-card"><div class="side-card-title">YOUR SOURCES <span id="tutor-source-count">0</span></div><div id="tutor-sources"></div></div></aside>
+          <aside class="tutor-sidebar"><div class="side-card"><div class="side-card-icon">⌕</div><b>Grounded answers</b><p>The tutor searches your uploaded pages, slides, and transcript cues, then shows the passages it used.</p></div><div class="side-card source-side-card"><div class="side-card-title">SOURCES <span id="tutor-source-count">0</span></div><div id="tutor-sources"></div></div></aside>
         </div>
       </section>
       <section class="page quiz-page hidden" id="quiz-page">
@@ -63,7 +63,19 @@
           <button class="primary-button" type="submit">Create quiz</button>
         </form>
         <div id="quiz-status" class="quiz-status" role="status" aria-live="polite"></div>
-        <form id="quiz-form" class="quiz-form hidden"><div id="quiz-questions"></div><button class="primary-button submit-quiz" type="submit">Submit answers</button></form>
+        <form id="quiz-form" class="quiz-form hidden">
+          <div class="quiz-workspace">
+            <aside class="quiz-rail">
+              <section class="quiz-progress-card"><span class="eyebrow">YOUR PROGRESS</span><strong id="quiz-answered-count">0</strong><span>Questions answered</span><div class="quiz-progress-track"><i id="quiz-progress-fill"></i></div></section>
+              <section class="quiz-palette-card"><div class="palette-heading"><b>Question palette</b><small id="quiz-palette-count"></small></div><div id="quiz-palette" class="quiz-palette"></div><div class="palette-legend"><span><i class="answered-dot"></i> Answered</span><span><i class="marked-dot"></i> Marked</span><span><i class="unanswered-dot"></i> Unanswered</span></div><button type="button" class="secondary-button" id="quiz-review-marked">Review marked</button></section>
+            </aside>
+            <section class="quiz-active-panel">
+              <div class="quiz-active-toolbar"><span id="quiz-question-count"></span><button type="button" id="quiz-mark-question" class="quiz-mark-button">☆ <span>Mark for review</span></button></div>
+              <div id="quiz-questions"></div>
+              <div class="quiz-navigation"><button type="button" class="secondary-button" id="quiz-prev">← Previous</button><button type="button" class="secondary-button" id="quiz-clear">Clear answer</button><button type="button" class="primary-button" id="quiz-next">Save &amp; next →</button><button class="primary-button submit-quiz hidden" type="submit">Submit answers</button></div>
+            </section>
+          </div>
+        </form>
         <div id="quiz-results" class="quiz-results hidden"></div>
       </section>
       <section class="page dashboard-page hidden" id="dashboard-page">
@@ -103,6 +115,6 @@
     </main>
   </div>
   <div class="toast" id="toast" role="status"></div>
-  <script src="/web/app.js?v=20261013-flashcards-mindmap"></script>
+  <script src="/web/app.js?v=20261014-ui-refresh"></script>
 </body>
 </html>

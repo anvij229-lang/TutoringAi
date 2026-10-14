@@ -32,3 +32,20 @@ Supported input: PDF, PPTX, TXT, VTT, and SRT; maximum 25 MB per file. A lecture
 
 1. Improve extraction of figures and diagrams, and support direct video transcription.
 2. Add a small evaluation set for citation accuracy, unsupported questions, and simulated learner profiles.
+## Run the frontend
+
+From the project root (the folder containing `web/`), open a terminal and run:
+
+**Windows**
+```powershell
+py -m http.server 5173
+```
+
+**Mac**
+```bash
+python3 -m http.server 5173
+```
+
+Keep the terminal running and open http://localhost:5173/web/ in your browser.
+
+Uploads, tutor, quizzes, and progress also need the backend running. See `TutoringAI_backend/backend` for backend setup. Keep `.env` credentials private; never commit them.

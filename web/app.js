@@ -18,6 +18,10 @@ const USER_ID = 'demo';
 let sources = readMaterials();
 let activeMaterialId = localStorage.getItem(ACTIVE_MATERIAL_KEY) || sources[0]?.id || '';
 let activeQuizId = null;
+let activeQuizQuestions = [];
+let activeQuestionIndex = 0;
+let activeQuizAnswers = {};
+let markedQuestions = new Set();
 let topicCache = [];
 let flashcardSession = null;
 
@@ -322,7 +326,13 @@ async function loadDashboard() {
     }).join('') : '<div class="dashboard-empty">Upload course material to see topic mastery.</div>';
 
     $('#attempt-list').innerHTML = data.recent_attempts?.length ? data.recent_attempts.map((attempt) => `<article class="attempt-row"><span class="attempt-icon">◷</span><span class="attempt-meta"><b>${escapeHtml(attempt.topic || 'Mixed topics')} quiz</b><small>${prettyDate(attempt.taken_at)} · ${escapeHtml(attempt.difficulty || 'adaptive')}</small></span><span class="attempt-score">${attempt.score}% <small>(${attempt.correct}/${attempt.total})</small></span></article>`).join('') : '<div class="dashboard-empty">Quiz results will appear here after your first attempt.</div>';
-    $('#dashboard-topic-chips').innerHTML = `<div class="topic-chip-group"><b>Strong</b>${(data.strong_topics || []).map((topic) => `<span class="status-chip strong">${escapeHtml(topic)}</span>`).join('') || '<span class="muted-chip">None yet</span>'}</div><div class="topic-chip-group"><b>Needs practice</b>${(data.weak_topics || []).map((topic) => `<span class="status-chip weak">${escapeHtml(topic)}</span>`).join('') || '<span class="muted-chip">None</span>'}</div>`;
+    const weakTopics = (data.topics || []).filter((item) => item.status === 'weak');
+    const weakRows = weakTopics.map((item) => {
+      const accuracy = item.accuracy == null ? (item.mastery == null ? 0 : Number(item.mastery)) : Number(item.accuracy);
+      return `<article class="weak-topic-row"><span class="weak-topic-symbol">${escapeHtml((item.name || '?').slice(0, 1).toUpperCase())}</span><span class="weak-topic-name"><b>${escapeHtml(item.name)}</b><small>${Number(item.questions_correct) || 0} of ${Number(item.questions_attempted) || 0} correct</small></span><b class="weak-topic-score">${Math.round(accuracy)}%</b><span class="status-chip weak">Weak</span></article>`;
+    }).join('');
+    const firstWeak = weakTopics[0];
+    $('#dashboard-topic-chips').innerHTML = `<section class="weak-focus-card"><header class="weak-focus-heading"><span class="weak-target-icon">◎</span><span><h2>Weak topics</h2><p>Focus on these areas to improve your score.</p></span><span class="needs-improvement">ⓘ Needs improvement</span></header><div class="weak-focus-content"><div class="weak-ring" style="--weak-progress:${Math.min(100, weakTopics.length * 18)}%"><div><b>${weakTopics.length}</b><span>Weak areas</span><small>Below 50% mastery</small></div></div><div class="weak-topic-table"><div class="weak-topic-table-head"><span>Topic</span><span>Score</span><span>Status</span></div>${weakRows || '<div class="dashboard-empty">No weak topics yet. Complete a quiz to see where to focus.</div>'}</div></div><div class="study-tip"><span class="tip-icon">✦</span><b>Study tip</b><span>${firstWeak ? `Practice ${escapeHtml(firstWeak.name)} to build mastery.` : 'Take a quiz to find which topics need more practice.'}</span>${firstWeak ? `<button type="button" class="primary-button practice-weak-button" data-focus-topic="${escapeHtml(firstWeak.topic_id)}">Practice now →</button>` : ''}</div></section><div class="topic-chip-group strong-topics"><b>Strong topics</b>${(data.strong_topics || []).map((topic) => `<span class="status-chip strong">${escapeHtml(topic)}</span>`).join('') || '<span class="muted-chip">Keep practicing to build mastery.</span>'}</div>`;
     renderTrend(data.mastery_trend || []);
   } catch (error) {
     $('#dashboard-summary').innerHTML = `<div class="dashboard-empty">${escapeHtml(error.message)}</div>`;
@@ -363,10 +373,11 @@ function showView(view) {
   document.querySelectorAll('.nav-item[data-view]').forEach((button) => button.classList.toggle('selected', button.dataset.view === view));
   $('.breadcrumb b').textContent = ({ tutor: 'Ask your tutor', quiz: 'Practice quiz', dashboard: 'My progress', flashcards: 'Flashcards', mindmap: 'Topic map' })[view] || 'Course library';
   if (view === 'tutor') $('#question-input').focus();
-  if (view === 'quiz') loadQuizTopics();
   if (view === 'dashboard') loadDashboard();
   if (view === 'flashcards') loadToolTopics('#flashcard-topic', 'All topics').catch((error) => { $('#flashcard-status').textContent = error.message; });
   if (view === 'mindmap') loadToolTopics('#mindmap-topic', 'Whole course').catch((error) => { $('#mindmap-status').textContent = error.message; });
+  if (view === 'quiz') return loadQuizTopics();
+  return Promise.resolve();
 }
 
 function addQuestion(text) {
@@ -470,16 +481,40 @@ async function generateQuiz({ topicId = '', difficulty = $('#quiz-difficulty').v
   if (topicId || $('#quiz-topic').value) request.topic_id = topicId || $('#quiz-topic').value;
   const quiz = await api('/api/quiz/generate', jsonOptions(request));
   activeQuizId = quiz.quiz_id;
-  $('#quiz-questions').innerHTML = (quiz.questions || []).map((question, index) => {
-    const options = (question.options || []).map((choice, optionIndex) => {
-      const letter = String.fromCharCode(65 + optionIndex);
-      return `<label class="quiz-option"><input type="radio" name="${escapeHtml(question.question_id)}" value="${letter}" required><span><b>${letter}.</b> ${escapeHtml(choice)}</span></label>`;
-    }).join('');
-    return `<article class="quiz-question" data-question-id="${escapeHtml(question.question_id)}"><div class="question-top"><span>QUESTION ${index + 1}</span><span class="question-type">${escapeHtml(question.topic || 'Course topic')}</span></div><h2>${escapeHtml(question.question)}</h2><div class="quiz-options">${options}</div></article>`;
-  }).join('');
-  $('#quiz-status').textContent = `${quiz.questions?.length || 0} questions · ${quiz.difficulty} difficulty${quiz.adaptive ? ' · adapted to your progress' : ''}`;
+  activeQuizQuestions = quiz.questions || [];
+  activeQuestionIndex = 0;
+  activeQuizAnswers = {};
+  markedQuestions = new Set();
+  if (!activeQuizQuestions.length) throw new Error('The backend returned an empty quiz. Try another topic.');
+  $('#quiz-status').textContent = `${activeQuizQuestions.length} questions · ${quiz.difficulty} difficulty${quiz.adaptive ? ' · adapted to your progress' : ''}`;
+  renderActiveQuizQuestion();
   $('#quiz-form').classList.remove('hidden');
   $('#quiz-form').scrollIntoView({ block: 'start', behavior: 'smooth' });
+}
+
+function renderActiveQuizQuestion() {
+  const question = activeQuizQuestions[activeQuestionIndex];
+  if (!question) return;
+  const options = (question.options || []).map((choice, optionIndex) => {
+    const letter = String.fromCharCode(65 + optionIndex);
+    const checked = activeQuizAnswers[question.question_id] === letter;
+    return `<label class="quiz-option ${checked ? 'is-selected' : ''}"><input type="radio" name="${escapeHtml(question.question_id)}" value="${letter}" ${checked ? 'checked' : ''}><span class="option-letter">${letter}</span><span>${escapeHtml(choice)}</span></label>`;
+  }).join('');
+  $('#quiz-questions').innerHTML = `<article class="quiz-question" data-question-id="${escapeHtml(question.question_id)}"><div class="question-topic-line"><span class="question-topic-pill">${escapeHtml(question.topic || 'Course topic')}</span><span class="question-mark-value">1 point</span></div><h2>${escapeHtml(question.question)}</h2><div class="quiz-options">${options}</div></article>`;
+  $('#quiz-question-count').textContent = `Question ${activeQuestionIndex + 1} of ${activeQuizQuestions.length}`;
+  $('#quiz-palette-count').textContent = `${Object.keys(activeQuizAnswers).length}/${activeQuizQuestions.length} answered`;
+  $('#quiz-answered-count').textContent = Object.keys(activeQuizAnswers).length;
+  $('#quiz-progress-fill').style.width = `${Object.keys(activeQuizAnswers).length / activeQuizQuestions.length * 100}%`;
+  $('#quiz-palette').innerHTML = activeQuizQuestions.map((item, index) => {
+    const state = markedQuestions.has(item.question_id) ? 'marked' : (activeQuizAnswers[item.question_id] ? 'answered' : 'unanswered');
+    return `<button type="button" class="palette-question ${state} ${index === activeQuestionIndex ? 'current' : ''}" data-question-index="${index}" aria-label="Go to question ${index + 1}">${index + 1}</button>`;
+  }).join('');
+  $('#quiz-prev').disabled = activeQuestionIndex === 0;
+  $('#quiz-next').classList.toggle('hidden', activeQuestionIndex === activeQuizQuestions.length - 1);
+  $('#quiz-form .submit-quiz').classList.toggle('hidden', activeQuestionIndex !== activeQuizQuestions.length - 1);
+  const marked = markedQuestions.has(question.question_id);
+  $('#quiz-mark-question').classList.toggle('marked', marked);
+  $('#quiz-mark-question').innerHTML = `${marked ? '★' : '☆'} <span>${marked ? 'Marked for review' : 'Mark for review'}</span>`;
 }
 
 function optionText(options, letter) {
@@ -649,10 +684,13 @@ $('#quiz-form').addEventListener('submit', async (event) => {
   if (!activeQuizId) return;
   const submitButton = $('#quiz-form button[type="submit"]');
   submitButton.disabled = true;
-  const answers = [...document.querySelectorAll('.quiz-question')].map((card) => ({
-    question_id: card.dataset.questionId,
-    answer: card.querySelector('input[type="radio"]:checked')?.value || '',
-  }));
+  const unanswered = activeQuizQuestions.filter((question) => !activeQuizAnswers[question.question_id]).length;
+  if (unanswered) {
+    $('#quiz-status').textContent = `Please answer every question before submitting. ${unanswered} remaining.`;
+    submitButton.disabled = false;
+    return;
+  }
+  const answers = activeQuizQuestions.map((question) => ({ question_id: question.question_id, answer: activeQuizAnswers[question.question_id] || '' }));
   try {
     const result = await api('/api/quiz/submit', jsonOptions({ quiz_id: activeQuizId, answers, user_id: USER_ID }));
     activeQuizId = null;
@@ -663,6 +701,47 @@ $('#quiz-form').addEventListener('submit', async (event) => {
   } finally {
     submitButton.disabled = false;
   }
+});
+
+$('#quiz-form').addEventListener('change', (event) => {
+  if (event.target.matches('input[type="radio"]')) {
+    const question = activeQuizQuestions[activeQuestionIndex];
+    if (question) activeQuizAnswers[question.question_id] = event.target.value;
+    renderActiveQuizQuestion();
+  }
+});
+$('#quiz-prev').addEventListener('click', () => { activeQuestionIndex = Math.max(0, activeQuestionIndex - 1); renderActiveQuizQuestion(); });
+$('#quiz-next').addEventListener('click', () => { activeQuestionIndex = Math.min(activeQuizQuestions.length - 1, activeQuestionIndex + 1); renderActiveQuizQuestion(); });
+$('#quiz-palette').addEventListener('click', (event) => {
+  const button = event.target.closest('[data-question-index]');
+  if (!button) return;
+  activeQuestionIndex = Number(button.dataset.questionIndex);
+  renderActiveQuizQuestion();
+});
+$('#quiz-mark-question').addEventListener('click', () => {
+  const questionId = activeQuizQuestions[activeQuestionIndex]?.question_id;
+  if (!questionId) return;
+  markedQuestions.has(questionId) ? markedQuestions.delete(questionId) : markedQuestions.add(questionId);
+  renderActiveQuizQuestion();
+});
+$('#quiz-clear').addEventListener('click', () => {
+  const questionId = activeQuizQuestions[activeQuestionIndex]?.question_id;
+  if (questionId) delete activeQuizAnswers[questionId];
+  renderActiveQuizQuestion();
+});
+$('#quiz-review-marked').addEventListener('click', () => {
+  const firstMarked = activeQuizQuestions.findIndex((question) => markedQuestions.has(question.question_id));
+  if (firstMarked < 0) { $('#quiz-status').textContent = 'No questions are marked for review.'; return; }
+  activeQuestionIndex = firstMarked;
+  renderActiveQuizQuestion();
+});
+$('#dashboard-topic-chips').addEventListener('click', (event) => {
+  const button = event.target.closest('[data-focus-topic]');
+  if (!button) return;
+  showView('quiz').then(() => {
+    $('#quiz-topic').value = button.dataset.focusTopic;
+    $('#quiz-difficulty').value = 'auto';
+  });
 });
 
 render();
