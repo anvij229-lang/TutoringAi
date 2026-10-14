@@ -4,3 +4,7 @@ data/uploads/
 data/sources.json
 data/quiz_history.json
 data/mastery.json
+*.mp4
+*.aiff
+.DS_Store
+.env
